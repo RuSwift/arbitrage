@@ -7,6 +7,7 @@ from app.cex.base import (
 )
 from app.cex.binance import BinancePerpetualConnector, BinanceSpotConnector
 from app.cex.bybit import BybitPerpetualConnector, BybitSpotConnector
+from app.cex.gate import GatePerpetualConnector, GateSpotConnector
 from app.cex.htx import HtxPerpetualConnector, HtxSpotConnector
 from app.cex.dto import (
     BidAsk,
@@ -29,6 +30,8 @@ __all__ = [
     "BinancePerpetualConnector",
     "BybitSpotConnector",
     "BybitPerpetualConnector",
+    "GateSpotConnector",
+    "GatePerpetualConnector",
     "HtxSpotConnector",
     "HtxPerpetualConnector",
     "BidAsk",

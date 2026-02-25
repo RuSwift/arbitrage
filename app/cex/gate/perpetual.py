@@ -1,0 +1,378 @@
+"""Gate.io USDT perpetual connector (REST + WebSocket)."""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from typing import Any
+
+import requests
+import websocket
+
+from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.dto import (
+    BidAsk,
+    BookDepth,
+    BookTicker,
+    CandleStick,
+    CurrencyPair,
+    PerpetualTicker,
+)
+
+GATE_FUTURES_API = "https://fx-api.gateio.ws/api/v4"
+GATE_FUTURES_WS = "wss://fx-ws.gateio.ws/v4/ws/usdt"
+GATE_FUTURES_WS_TESTNET = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt"
+KLINE_SIZE = 60
+SETTLE = "usdt"
+QUOTES = ("USDT", "USDC")
+
+
+def _utc_now_float() -> float:
+    return time.time()
+
+
+def _gate_to_symbol(contract: str) -> str:
+    """BTC_USDT -> BTC/USDT."""
+    return contract.replace("_", "/").upper()
+
+
+def _symbol_to_gate(symbol: str) -> str:
+    """BTC/USDT -> BTC_USDT."""
+    return symbol.replace("/", "_").upper()
+
+
+def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicker]:
+    out: dict[str, PerpetualTicker] = {}
+    for t in tickers:
+        out[t.symbol] = t
+        out[t.exchange_symbol] = t
+        out[t.symbol.replace("/", "")] = t
+        out[t.symbol.replace("/", "_")] = t
+    return out
+
+
+class GatePerpetualConnector(BaseCEXPerpetualConnector):
+    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+        self._cached_perps: list[PerpetualTicker] | None = None
+        self._cached_perps_dict: dict[str, PerpetualTicker] = {}
+        self._ws: websocket.WebSocketApp | None = None
+        self._ws_thread: threading.Thread | None = None
+        self._cb: Callback | None = None
+
+    @classmethod
+    def exchange_id(cls) -> str:
+        return "gate"
+
+    def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
+        url = GATE_FUTURES_API + path
+        r = requests.get(url, params=params or {}, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
+    def start(
+        self,
+        cb: Callback,
+        symbols: list[str] | None = None,
+        depth: bool = True,
+    ) -> None:
+        if self._ws is not None:
+            raise RuntimeError("WebSocket already active. Call stop() first.")
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        if symbols is None:
+            syms = [t.exchange_symbol for t in self._cached_perps]
+        else:
+            syms = [
+                t.exchange_symbol
+                for t in self._cached_perps
+                if t.symbol in symbols or t.exchange_symbol in symbols
+            ]
+        if not syms:
+            raise RuntimeError("No symbols to subscribe")
+        self._cb = cb
+        ws_url = GATE_FUTURES_WS_TESTNET if self._is_testing else GATE_FUTURES_WS
+        self._ws = websocket.WebSocketApp(
+            ws_url,
+            on_message=self._on_ws_message,
+        )
+        self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
+        self._ws_thread.daemon = True
+        self._ws_thread.start()
+        for _ in range(10):
+            if self._ws.sock and self._ws.sock.connected:
+                break
+            time.sleep(1)
+        if not self._ws.sock or not self._ws.sock.connected:
+            self._ws = None
+            self._ws_thread = None
+            raise RuntimeError("Gate futures WebSocket connection failed.")
+        for contract in syms:
+            self._ws_send("futures.book_ticker", "subscribe", [contract])
+            if depth:
+                self._ws_send("futures.order_book_update", "subscribe", [contract, "100ms", "100"])
+
+    def _ws_send(self, channel: str, event: str, payload: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        msg = {
+            "time": int(time.time()),
+            "channel": channel,
+            "event": event,
+            "payload": payload,
+        }
+        self._ws.send(json.dumps(msg))
+
+    def stop(self) -> None:
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        self._ws_thread = None
+        self._cb = None
+
+    def get_all_perpetuals(self) -> list[PerpetualTicker]:
+        if self._cached_perps is not None:
+            return self._cached_perps
+        data = self._get(f"/futures/{SETTLE}/contracts")
+        if not isinstance(data, list):
+            raise RuntimeError("Failed to get futures contracts")
+        perps: list[PerpetualTicker] = []
+        for item in data:
+            name = item.get("name", "")
+            if "_" not in name:
+                continue
+            base, quote = name.split("_", 1)
+            if item.get("in_delisting", False):
+                continue
+            perps.append(
+                PerpetualTicker(
+                    symbol=_gate_to_symbol(name),
+                    base=base,
+                    quote=quote,
+                    exchange_symbol=name,
+                    settlement=quote,
+                )
+            )
+        self._cached_perps = perps
+        self._cached_perps_dict = _build_perp_dict(perps)
+        return self._cached_perps
+
+    def get_price(self, symbol: str) -> CurrencyPair | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        try:
+            data = self._get("/futures/usdt/tickers", {"contract": contract})
+        except Exception:
+            return None
+        if isinstance(data, list) and data:
+            row = data[0]
+        elif isinstance(data, dict):
+            row = data
+        else:
+            return None
+        if row.get("contract", "").upper() != contract.upper():
+            return None
+        last = row.get("last")
+        if last is None:
+            return None
+        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
+        if not ticker:
+            return None
+        return CurrencyPair(
+            base=ticker.base,
+            quote=ticker.quote,
+            ratio=float(last),
+            utc=_utc_now_float(),
+        )
+
+    def get_pairs(self, symbols: list[str] | None = None) -> list[CurrencyPair]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        if symbols is None:
+            data = self._get("/futures/usdt/tickers")
+        else:
+            data = []
+            for s in symbols:
+                contract = self._exchange_symbol(s) or _symbol_to_gate(s)
+                if contract:
+                    try:
+                        r = self._get("/futures/usdt/tickers", {"contract": contract})
+                        if isinstance(r, list):
+                            data.extend(r)
+                        elif isinstance(r, dict):
+                            data.append(r)
+                    except Exception:
+                        pass
+        if not isinstance(data, list):
+            data = [data] if isinstance(data, dict) else []
+        result: list[CurrencyPair] = []
+        for row in data:
+            contract = row.get("contract", "")
+            ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(
+                _gate_to_symbol(contract)
+            )
+            if not ticker:
+                continue
+            last = row.get("last")
+            if last is None:
+                continue
+            result.append(
+                CurrencyPair(
+                    base=ticker.base,
+                    quote=ticker.quote,
+                    ratio=float(last),
+                    utc=_utc_now_float(),
+                )
+            )
+        return result
+
+    def get_depth(self, symbol: str, limit: int = 100) -> BookDepth | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        try:
+            data = self._get(
+                f"/futures/{SETTLE}/order_book",
+                {"contract": contract, "limit": str(min(limit, 100))},
+            )
+        except Exception:
+            return None
+        if not data:
+            return None
+        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        raw_bids = data.get("bids", [])
+        raw_asks = data.get("asks", [])
+        if raw_bids and isinstance(raw_bids[0], dict):
+            bids = [BidAsk(price=float(x["p"]), quantity=float(x["s"])) for x in raw_bids]
+            asks = [BidAsk(price=float(x["p"]), quantity=float(x["s"])) for x in raw_asks]
+        else:
+            bids = [BidAsk(price=float(p), quantity=float(q)) for p, q in raw_bids]
+            asks = [BidAsk(price=float(p), quantity=float(q)) for p, q in raw_asks]
+        return BookDepth(
+            symbol=sym,
+            exchange_symbol=contract,
+            bids=bids,
+            asks=asks,
+            last_update_id=data.get("id"),
+            utc=_utc_now_float(),
+        )
+
+    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        try:
+            data = self._get(
+                f"/futures/{SETTLE}/candlesticks",
+                {"contract": contract, "interval": "1m", "limit": str(KLINE_SIZE)},
+            )
+        except Exception:
+            return None
+        if not isinstance(data, list):
+            return None
+        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
+        quote = ticker.quote if ticker else ""
+        usd_vol = quote in QUOTES
+        result: list[CandleStick] = []
+        for row in data:
+            if isinstance(row, list):
+                t, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
+            else:
+                t = row.get("t", row.get("timestamp", 0))
+                o = row.get("o", row.get("open", 0))
+                h = row.get("h", row.get("high", 0))
+                l = row.get("l", row.get("low", 0))
+                c = row.get("c", row.get("close", 0))
+                v = row.get("v", row.get("volume", 0))
+            ts = float(t)
+            utc_open = ts / 1000.0 if ts > 1e12 else ts
+            result.append(
+                CandleStick(
+                    utc_open_time=utc_open,
+                    open_price=float(o),
+                    high_price=float(h),
+                    low_price=float(l),
+                    close_price=float(c),
+                    coin_volume=float(v),
+                    usd_volume=float(v) * float(c) if usd_vol else None,
+                )
+            )
+        return result
+
+    def _exchange_symbol(self, symbol: str) -> str | None:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        t = (
+            self._cached_perps_dict.get(symbol)
+            or self._cached_perps_dict.get(symbol.replace("/", "_"))
+            or self._cached_perps_dict.get(symbol.replace("/", ""))
+        )
+        return t.exchange_symbol if t else None
+
+    def _on_ws_message(self, _: Any, raw: bytes | str) -> None:
+        if not self._cb:
+            return
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        try:
+            msg = json.loads(raw)
+        except Exception:
+            return
+        if msg.get("event") == "pong" or "error" in msg:
+            return
+        channel = msg.get("channel", "")
+        event = msg.get("event", "")
+        if event != "update":
+            return
+        result = msg.get("result")
+        if not result:
+            return
+        if channel == "futures.book_ticker":
+            s = result.get("s", "")
+            sym = _gate_to_symbol(s)
+            ticker = self._cached_perps_dict.get(s) or self._cached_perps_dict.get(sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="book"):
+                return
+            b, B = result.get("b", "0"), result.get("B", 0)
+            a, A = result.get("a", "0"), result.get("A", 0)
+            self._cb.handle(
+                book=BookTicker(
+                    symbol=ticker.symbol,
+                    bid_price=float(b) if b else 0.0,
+                    bid_qty=float(B) if B else 0.0,
+                    ask_price=float(a) if a else 0.0,
+                    ask_qty=float(A) if A else 0.0,
+                    last_update_id=result.get("u"),
+                    utc=float(result.get("t", 0)) / 1000,
+                )
+            )
+        elif channel == "futures.order_book_update":
+            s = result.get("s", "")
+            sym = _gate_to_symbol(s)
+            ticker = self._cached_perps_dict.get(s) or self._cached_perps_dict.get(sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="depth"):
+                return
+            bids = result.get("b", [])
+            asks = result.get("a", [])
+            if bids and isinstance(bids[0], dict):
+                bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
+                ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
+            else:
+                bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
+                ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
+            self._cb.handle(
+                depth=BookDepth(
+                    symbol=ticker.symbol,
+                    exchange_symbol=ticker.exchange_symbol or s,
+                    bids=bid_list,
+                    asks=ask_list,
+                    last_update_id=result.get("u"),
+                    utc=float(result.get("t", 0)) / 1000,
+                )
+            )
