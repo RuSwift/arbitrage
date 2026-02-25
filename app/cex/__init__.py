@@ -5,6 +5,7 @@ from app.cex.base import (
     BaseCEXSpotConnector,
     Callback,
 )
+from app.cex.binance import BinancePerpetualConnector, BinanceSpotConnector
 from app.cex.bybit import BybitPerpetualConnector, BybitSpotConnector
 from app.cex.htx import HtxPerpetualConnector, HtxSpotConnector
 from app.cex.dto import (
@@ -24,6 +25,8 @@ __all__ = [
     "BaseCEXSpotConnector",
     "BaseCEXPerpetualConnector",
     "Callback",
+    "BinanceSpotConnector",
+    "BinancePerpetualConnector",
     "BybitSpotConnector",
     "BybitPerpetualConnector",
     "HtxSpotConnector",
