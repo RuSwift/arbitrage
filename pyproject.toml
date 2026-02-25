@@ -16,6 +16,7 @@ kucoin-python = "^1.0.20"
 # HTTP/WebSocket only
 aiohttp = "^3.9"
 websocket-client = "^1.6"
+requests = "^2.31"
 # API + DB
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.32"}

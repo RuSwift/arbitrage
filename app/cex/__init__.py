@@ -6,6 +6,7 @@ from app.cex.base import (
     Callback,
 )
 from app.cex.bybit import BybitPerpetualConnector, BybitSpotConnector
+from app.cex.htx import HtxPerpetualConnector, HtxSpotConnector
 from app.cex.dto import (
     BidAsk,
     BookDepth,
@@ -25,6 +26,8 @@ __all__ = [
     "Callback",
     "BybitSpotConnector",
     "BybitPerpetualConnector",
+    "HtxSpotConnector",
+    "HtxPerpetualConnector",
     "BidAsk",
     "BookDepth",
     "BookTicker",
