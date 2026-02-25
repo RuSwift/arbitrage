@@ -1,0 +1,18 @@
+---
+alwaysApply: true
+---
+
+Use python environments in .venv directory in project root
+
+Generally we interest in 
+ - Spot market
+ - USD-M market (perpetual futures)
+
+Docs:
+ - binance: https://www.binance.com/en/binance-api
+ - bybit: https://bybit-exchange.github.io/docs/v5/guide
+ - okx: https://www.okx.com/en-eu/okx-api
+ - kucoin: https://www.kucoin.com/docs-new/introduction?lang=en_US&
+ - htx: https://www.htx.com/en-us/opend/newApiPages/
+ - mexc: https://www.mexc.com/ru-RU/mexc-api
+ - bitfinex: https://docs.bitfinex.com/docs/rest-public 
