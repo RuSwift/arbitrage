@@ -41,7 +41,10 @@ class _BaseCEXConnectorMixin:
     ) -> None:
         self._is_testing = is_testing
         redis_url = Settings().redis.url
-        self._throttler = Throttler(timeout=throttle_timeout, redis_url=redis_url)
+        key_prefix = f"arbitrage:throttle:{self.__class__.__name__}"
+        self._throttler = Throttler(
+            timeout=throttle_timeout, redis_url=redis_url, key_prefix=key_prefix
+        )
 
 
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):

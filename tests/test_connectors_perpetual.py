@@ -1,0 +1,101 @@
+"""Tests for perpetual (USD-M) CEX connectors (REST: perpetuals, pairs, price, depth, klines)."""
+
+from time import sleep
+
+import pytest
+
+from app.cex.base import BaseCEXPerpetualConnector
+from app.cex import (
+    BinancePerpetualConnector,
+    BitfinexPerpetualConnector,
+    BybitPerpetualConnector,
+    GatePerpetualConnector,
+    HtxPerpetualConnector,
+    KucoinPerpetualConnector,
+    MexcPerpetualConnector,
+    OkxPerpetualConnector,
+)
+
+from .helpers_connectors import (
+    TestableCallback,
+    common_check_book_depth,
+    common_check_book_ticker,
+    common_check_currency_pair,
+    common_check_perpetual_ticker,
+)
+
+PERPETUAL_CONNECTORS = [
+    BinancePerpetualConnector,
+    BitfinexPerpetualConnector,
+    BybitPerpetualConnector,
+    GatePerpetualConnector,
+    HtxPerpetualConnector,
+    KucoinPerpetualConnector,
+    MexcPerpetualConnector,
+    OkxPerpetualConnector,
+]
+
+
+@pytest.fixture(params=PERPETUAL_CONNECTORS, ids=[c.__name__ for c in PERPETUAL_CONNECTORS])
+def connector(request, redis_client) -> BaseCEXPerpetualConnector:
+    """Perpetual connector for current exchange; requires Redis (skipped if unavailable)."""
+    return request.param()
+
+
+@pytest.fixture
+def valid_pair_code() -> str:
+    return "BTC/USDT"
+
+
+class TestPerpetualConnector:
+    def test_get_all_perpetuals(self, connector: BaseCEXPerpetualConnector) -> None:
+        perps = connector.get_all_perpetuals()
+        assert len(perps) > 0
+        common_check_perpetual_ticker(perps[0])
+
+    def test_get_pairs(self, connector: BaseCEXPerpetualConnector) -> None:
+        pairs = connector.get_pairs()
+        assert len(pairs) > 0
+        common_check_currency_pair(pairs[0])
+
+    def test_get_price(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        pair = connector.get_price(valid_pair_code)
+        assert pair is not None
+        common_check_currency_pair(pair)
+        assert connector.get_price("XXX/BTC") is None
+
+    def test_get_depth(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        book = connector.get_depth(valid_pair_code)
+        assert book is not None
+        assert len(book.bids) > 0
+        assert len(book.asks) > 0
+        common_check_book_depth(book)
+
+    def test_get_klines(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        klines = connector.get_klines(valid_pair_code)
+        assert klines is not None
+        assert isinstance(klines, list)
+        assert len(klines) > 0
+        # Ascending or descending order depends on exchange
+        assert klines[0].utc_open_time != klines[-1].utc_open_time
+        assert 1 <= len(klines) <= 200
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(15)
+    def test_book_events(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        cb = TestableCallback()
+        connector.start(cb, symbols=[valid_pair_code, "BTC/INVALID"])
+        sleep(5)
+        connector.stop()
+        assert len(cb.books) > 0
+        if cb.depths:
+            common_check_book_depth(cb.depths[0])
+        common_check_book_ticker(cb.books[0])

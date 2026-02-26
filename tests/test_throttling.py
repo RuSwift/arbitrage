@@ -41,3 +41,17 @@ class TestThrottler:
         assert throttler.may_pass("sym", tag="depth") is True
         assert throttler.may_pass("sym", tag="book") is False
         assert throttler.may_pass("sym", tag="depth") is False
+
+
+def test_connector_throttler_key_isolation(redis_client) -> None:
+    """Throttlers of different connector classes must not share Redis keys (no cross-throttle)."""
+    from app.cex.binance import BinanceSpotConnector, BinancePerpetualConnector
+
+    spot = BinanceSpotConnector()
+    perp = BinancePerpetualConnector()
+    name, tag = "BTC/USDT", "book"
+
+    assert spot._throttler.may_pass(name, tag=tag) is True
+    assert perp._throttler.may_pass(name, tag=tag) is True
+    assert spot._throttler.may_pass(name, tag=tag) is False
+    assert perp._throttler.may_pass(name, tag=tag) is False
