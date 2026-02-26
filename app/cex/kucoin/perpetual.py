@@ -23,7 +23,6 @@ from app.cex.dto import (
 KUCOIN_FUTURES_API = "https://api-futures.kucoin.com"
 KUCOIN_FUTURES_WS = "wss://ws-api-futures.kucoin.com"
 KUCOIN_FUTURES_WS_PUSH = "wss://x-push-futures.kucoin.com"
-KLINE_SIZE = 60
 QUOTES = ("USDT", "USDC")
 
 
@@ -62,6 +61,11 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 
 
 class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -78,7 +82,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = KUCOIN_FUTURES_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if data.get("code") != "200000":
@@ -87,7 +91,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get_ws_endpoint(self) -> str:
         """Get WebSocket URL with token (bullet-public)."""
-        r = requests.post(KUCOIN_FUTURES_API + "/api/v1/bullet-public", timeout=15)
+        r = requests.post(KUCOIN_FUTURES_API + "/api/v1/bullet-public", timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if data.get("code") != "200000":
@@ -137,7 +141,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         if not self._cached_perps_dict:
             self.get_all_perpetuals()
         if symbols is None:
-            syms = [t.exchange_symbol for t in self._cached_perps][:200]
+            syms = [t.exchange_symbol for t in self._cached_perps]
         else:
             syms = [
                 t.exchange_symbol
@@ -154,10 +158,10 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -298,10 +302,18 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         ex_sym = self._exchange_symbol(symbol) or _symbol_to_kucoin_futures(symbol)
         if not ex_sym:
             return None
+        # KuCoin futures uses /api/v1/kline/query with startAt/endAt (ms)
+        end_ms = int(_utc_now_float() * 1000)
+        start_ms = end_ms - self.KLINE_SIZE * 60 * 1000
         try:
             data = self._get(
-                "/api/v1/klines",
-                {"symbol": ex_sym, "granularity": "60"},
+                "/api/v1/kline/query",
+                {
+                    "symbol": ex_sym,
+                    "granularity": "1",
+                    "startAt": str(start_ms),
+                    "endAt": str(end_ms),
+                },
             )
         except Exception:
             return None
@@ -311,7 +323,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for row in data[:KLINE_SIZE]:
+        for row in data[: self.KLINE_SIZE]:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             ts, o, h, l, c, vol = row[0], row[1], row[2], row[3], row[4], row[5]

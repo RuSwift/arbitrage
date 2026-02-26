@@ -18,7 +18,6 @@ from app.cex.dto import (
     PerpetualTicker,
 )
 
-KLINE_WINDOW_SECS = 60 * 60
 PERPETUAL_TOKENS = ("USDT", "USDC", "DAI")
 
 
@@ -36,6 +35,14 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 
 
 class BybitPerpetualConnector(BaseCEXPerpetualConnector):
+    """Bybit linear perpetual. REST + WebSocket."""
+
+    KLINE_WINDOW_SECS = 60 * 60
+    KLINE_SIZE = 60
+    ORDERBOOK_BOOK_DEPTH = 1
+    ORDERBOOK_DEPTH_LEVELS = 50
+    INSTRUMENTS_PAGE_LIMIT = 200
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -72,9 +79,9 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             ]
         self._cb = cb
         for sym in syms:
-            self._ws.orderbook_stream(depth=1, symbol=sym, callback=self._on_ws_message)
+            self._ws.orderbook_stream(depth=self.ORDERBOOK_BOOK_DEPTH, symbol=sym, callback=self._on_ws_message)
             if depth:
-                self._ws.orderbook_stream(depth=50, symbol=sym, callback=self._on_ws_message)
+                self._ws.orderbook_stream(depth=self.ORDERBOOK_DEPTH_LEVELS, symbol=sym, callback=self._on_ws_message)
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -91,7 +98,11 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         all_perps: list[PerpetualTicker] = []
         cursor: str | None = None
         while True:
-            kwargs: dict[str, Any] = {"category": "linear", "status": "Trading", "limit": 200}
+            kwargs: dict[str, Any] = {
+                "category": "linear",
+                "status": "Trading",
+                "limit": self.INSTRUMENTS_PAGE_LIMIT,
+            }
             if cursor:
                 kwargs["cursor"] = cursor
             resp = self._api.get_instruments_info(**kwargs)
@@ -189,7 +200,7 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             category="linear",
             symbol=ex_sym,
             interval="1",
-            limit=KLINE_WINDOW_SECS // 60,
+            limit=self.KLINE_SIZE,
         )
         if r.get("retCode") != 0:
             raise RuntimeError(r.get("retMsg", "Failed to get klines"))
@@ -211,7 +222,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         if not topic.startswith("orderbook."):
             return
         parts = topic.split(".")
-        depth_level = parts[-1] if len(parts) >= 2 else ""
+        # Bybit topic: orderbook.{depth}.{symbol} e.g. orderbook.1.BTCUSDT
+        depth_level = parts[1] if len(parts) >= 2 else ""
         data = message.get("data", {})
         if not data:
             return

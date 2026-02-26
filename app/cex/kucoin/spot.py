@@ -23,7 +23,6 @@ from app.cex.dto import (
 KUCOIN_SPOT_API = "https://api.kucoin.com"
 KUCOIN_SPOT_WS = "wss://ws-api-spot.kucoin.com"
 KUCOIN_SPOT_WS_PUSH = "wss://x-push-spot.kucoin.com"
-KLINE_SIZE = 60
 QUOTES = ("USDT", "USDC", "BTC", "ETH")
 
 
@@ -54,6 +53,11 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class KucoinSpotConnector(BaseCEXSpotConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -70,7 +74,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = KUCOIN_SPOT_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if data.get("code") != "200000":
@@ -79,7 +83,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
 
     def _get_ws_endpoint(self) -> str:
         """Get WebSocket URL with token (bullet-public)."""
-        r = requests.post(KUCOIN_SPOT_API + "/api/v1/bullet-public", timeout=15)
+        r = requests.post(KUCOIN_SPOT_API + "/api/v1/bullet-public", timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if data.get("code") != "200000":
@@ -129,7 +133,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         if not self._cached_tickers_dict:
             self.get_all_tickers()
         if symbols is None:
-            syms = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol][:200]
+            syms = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol]
         else:
             syms = [
                 t.exchange_symbol
@@ -146,10 +150,10 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -311,7 +315,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for row in data[:KLINE_SIZE]:
+        for row in data[: self.KLINE_SIZE]:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             ts, o, c, h, l, vol = row[0], row[1], row[2], row[3], row[4], row[5]

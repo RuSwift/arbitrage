@@ -24,7 +24,6 @@ BINANCE_FAPI = "https://fapi.binance.com"
 BINANCE_FAPI_TESTNET = "https://testnet.binancefuture.com"
 BINANCE_FSTREAM_WS = "wss://fstream.binance.com"
 BINANCE_FSTREAM_WS_TESTNET = "wss://stream.binancefuture.com"
-KLINE_WINDOW_MINS = 60
 PERPETUAL_TOKENS = ("USDT", "USDC", "BUSD")
 
 
@@ -42,6 +41,17 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 
 
 class BinancePerpetualConnector(BaseCEXPerpetualConnector):
+    """Binance USD-M perpetual. REST + WebSocket."""
+
+    REQUEST_TIMEOUT_SEC = 15
+    """HTTP request timeout for REST API."""
+    DEPTH_API_MAX = 500
+    """Max orderbook depth allowed by Binance FAPI."""
+    KLINE_SIZE = 60
+    """Number of 1m candles returned by get_klines."""
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -58,7 +68,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = self._base + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 
@@ -97,10 +107,10 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -165,23 +175,28 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
     def get_pairs(self, symbols: list[str] | None = None) -> list[CurrencyPair]:
         if not self._cached_perps_dict:
             self.get_all_perpetuals()
+        try:
+            r = self._get("/fapi/v1/ticker/price")
+        except Exception:
+            return []
+        if not isinstance(r, list):
+            return []
+        price_map = {
+            item["symbol"]: float(item["price"])
+            for item in r
+            if item.get("symbol") and item.get("price") is not None
+        }
         if symbols is None:
-            sym_list = [t.exchange_symbol for t in self._cached_perps][:300]
+            sym_list = [t.exchange_symbol for t in self._cached_perps]
         else:
             sym_list = []
             for s in symbols:
                 ex = self._exchange_symbol(s) or s.replace("/", "").upper()
                 if ex:
                     sym_list.append(ex)
-        if not sym_list:
-            return []
         pairs: list[CurrencyPair] = []
         for ex_sym in sym_list:
-            try:
-                r = self._get("/fapi/v1/ticker/price", {"symbol": ex_sym})
-            except Exception:
-                continue
-            if not r or "price" not in r:
+            if ex_sym not in price_map:
                 continue
             ticker = self._cached_perps_dict.get(ex_sym)
             if ticker:
@@ -189,7 +204,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                     CurrencyPair(
                         base=ticker.base,
                         quote=ticker.quote,
-                        ratio=float(r["price"]),
+                        ratio=price_map[ex_sym],
                         utc=_utc_now_float(),
                     )
                 )
@@ -200,7 +215,10 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         if not ex_sym:
             return None
         try:
-            r = self._get("/fapi/v1/depth", {"symbol": ex_sym, "limit": str(min(limit, 500))})
+            r = self._get(
+                "/fapi/v1/depth",
+                {"symbol": ex_sym, "limit": str(min(limit, self.DEPTH_API_MAX))},
+            )
         except Exception:
             return None
         if not r:
@@ -227,7 +245,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         try:
             rows = self._get(
                 "/fapi/v1/klines",
-                {"symbol": ex_sym, "interval": "1m", "limit": str(KLINE_WINDOW_MINS)},
+                {"symbol": ex_sym, "interval": "1m", "limit": str(self.KLINE_SIZE)},
             )
         except Exception:
             return None

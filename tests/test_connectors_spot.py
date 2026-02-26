@@ -48,11 +48,13 @@ def valid_pair_code() -> str:
 
 
 class TestSpotConnector:
+    @pytest.mark.timeout(15)
     def test_get_tickers_list(self, connector: BaseCEXSpotConnector) -> None:
         tickers = connector.get_all_tickers()
         assert len(tickers) > 0
         common_check_ticker(tickers[0])
 
+    @pytest.mark.timeout(15)
     def test_get_tickers_caching(self, connector: BaseCEXSpotConnector) -> None:
         tickers = connector.get_all_tickers()
         for _ in range(2):
@@ -60,11 +62,13 @@ class TestSpotConnector:
             other_tickers = other.get_all_tickers()
             assert tickers == other_tickers
 
+    @pytest.mark.timeout(15)
     def test_get_pairs(self, connector: BaseCEXSpotConnector) -> None:
         pairs = connector.get_pairs()
         assert len(pairs) > 0
         common_check_currency_pair(pairs[0])
 
+    @pytest.mark.timeout(15)
     def test_get_price(
         self, connector: BaseCEXSpotConnector, valid_pair_code: str
     ) -> None:
@@ -74,6 +78,7 @@ class TestSpotConnector:
         invalid_code = "XXX/BTC"
         assert connector.get_price(invalid_code) is None
 
+    @pytest.mark.timeout(15)
     def test_get_depth(
         self, connector: BaseCEXSpotConnector, valid_pair_code: str
     ) -> None:
@@ -83,6 +88,7 @@ class TestSpotConnector:
         assert len(book.asks) > 0
         common_check_book_depth(book)
 
+    @pytest.mark.timeout(15)
     def test_get_klines(
         self, connector: BaseCEXSpotConnector, valid_pair_code: str
     ) -> None:

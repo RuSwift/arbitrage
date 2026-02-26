@@ -23,7 +23,6 @@ from app.cex.dto import (
 GATE_FUTURES_API = "https://fx-api.gateio.ws/api/v4"
 GATE_FUTURES_WS = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 GATE_FUTURES_WS_TESTNET = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt"
-KLINE_SIZE = 60
 SETTLE = "usdt"
 QUOTES = ("USDT", "USDC")
 
@@ -53,6 +52,12 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 
 
 class GatePerpetualConnector(BaseCEXPerpetualConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    DEPTH_API_MAX = 100
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -60,6 +65,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
+        self._depth_cache: dict[str, dict] = {}
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -67,7 +73,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = GATE_FUTURES_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 
@@ -100,10 +106,10 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -133,6 +139,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+        self._depth_cache.clear()
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:
@@ -238,7 +245,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         try:
             data = self._get(
                 f"/futures/{SETTLE}/order_book",
-                {"contract": contract, "limit": str(min(limit, 100))},
+                {"contract": contract, "limit": str(min(limit, self.DEPTH_API_MAX))},
             )
         except Exception:
             return None
@@ -270,7 +277,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         try:
             data = self._get(
                 f"/futures/{SETTLE}/candlesticks",
-                {"contract": contract, "interval": "1m", "limit": str(KLINE_SIZE)},
+                {"contract": contract, "interval": "1m", "limit": str(self.KLINE_SIZE)},
             )
         except Exception:
             return None
@@ -366,13 +373,28 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             else:
                 bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
                 ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
-            self._cb.handle(
-                depth=BookDepth(
-                    symbol=ticker.symbol,
-                    exchange_symbol=ticker.exchange_symbol or s,
-                    bids=bid_list,
-                    asks=ask_list,
-                    last_update_id=result.get("u"),
-                    utc=float(result.get("t", 0)) / 1000,
+            u = result.get("u")
+            t = float(result.get("t", 0)) / 1000
+            cache = self._depth_cache.setdefault(ticker.symbol, {"bids": None, "asks": None, "u": None, "t": 0.0})
+            if bid_list:
+                cache["bids"] = bid_list
+                cache["u"] = u
+                cache["t"] = t
+            if ask_list:
+                cache["asks"] = ask_list
+                cache["u"] = u
+                cache["t"] = t
+            final_bids = cache["bids"]
+            final_asks = cache["asks"]
+            if final_bids and final_asks:
+                self._cb.handle(
+                    depth=BookDepth(
+                        symbol=ticker.symbol,
+                        exchange_symbol=ticker.exchange_symbol or s,
+                        bids=final_bids,
+                        asks=final_asks,
+                        last_update_id=cache["u"],
+                        utc=cache["t"],
+                    )
                 )
-            )
+                del self._depth_cache[ticker.symbol]

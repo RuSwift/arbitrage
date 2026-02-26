@@ -18,7 +18,6 @@ from app.cex.dto import (
     Ticker,
 )
 
-KLINE_WINDOW_SECS = 60 * 60  # 1 hr
 PERPETUAL_TOKENS = ("USDT", "USDC", "DAI")
 
 
@@ -37,6 +36,17 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class BybitSpotConnector(BaseCEXSpotConnector):
+    """Bybit spot. REST + WebSocket."""
+
+    KLINE_WINDOW_SECS = 60 * 60
+    """Time window for get_klines (1 hour)."""
+    KLINE_SIZE = 60
+    """Number of 1m candles (KLINE_WINDOW_SECS // 60)."""
+    ORDERBOOK_BOOK_DEPTH = 1
+    """Depth level for book-ticker stream."""
+    ORDERBOOK_DEPTH_LEVELS = 50
+    """Depth levels for orderbook stream when depth=True."""
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -73,9 +83,9 @@ class BybitSpotConnector(BaseCEXSpotConnector):
             ]
         self._cb = cb
         for sym in syms:
-            self._ws.orderbook_stream(depth=1, symbol=sym, callback=self._on_ws_message)
+            self._ws.orderbook_stream(depth=self.ORDERBOOK_BOOK_DEPTH, symbol=sym, callback=self._on_ws_message)
             if depth:
-                self._ws.orderbook_stream(depth=50, symbol=sym, callback=self._on_ws_message)
+                self._ws.orderbook_stream(depth=self.ORDERBOOK_DEPTH_LEVELS, symbol=sym, callback=self._on_ws_message)
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -180,7 +190,7 @@ class BybitSpotConnector(BaseCEXSpotConnector):
             category="spot",
             symbol=ex_sym,
             interval="1",
-            limit=KLINE_WINDOW_SECS // 60,
+            limit=self.KLINE_SIZE,
         )
         if r.get("retCode") != 0:
             raise RuntimeError(r.get("retMsg", "Failed to get klines"))

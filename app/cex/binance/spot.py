@@ -20,7 +20,6 @@ from app.cex.dto import (
 )
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443/ws"
-KLINE_WINDOW_MINS = 60
 PERPETUAL_TOKENS = ("USDT", "USDC", "BUSD")
 
 
@@ -40,6 +39,13 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class BinanceSpotConnector(BaseCEXSpotConnector):
+    """Binance spot. REST + WebSocket."""
+
+    DEPTH_API_MAX = 5000
+    """Max orderbook depth allowed by Binance spot API."""
+    KLINE_SIZE = 60
+    """Number of 1m candles returned by get_klines."""
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -143,7 +149,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         if not self._cached_tickers_dict:
             self.get_all_tickers()
         if symbols is None:
-            sym_list = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol][:300]
+            sym_list = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol]
         else:
             sym_list = []
             for s in symbols:
@@ -183,7 +189,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         if not ex_sym:
             return None
         try:
-            r = self._api.depth(symbol=ex_sym, limit=min(limit, 5000))
+            r = self._api.depth(symbol=ex_sym, limit=min(limit, self.DEPTH_API_MAX))
         except Exception:
             return None
         if not r:
@@ -211,7 +217,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             rows = self._api.klines(
                 symbol=ex_sym,
                 interval="1m",
-                limit=KLINE_WINDOW_MINS,
+                limit=self.KLINE_SIZE,
             )
         except Exception:
             return None

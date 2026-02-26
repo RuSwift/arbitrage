@@ -23,7 +23,6 @@ from app.cex.dto import (
 GATE_SPOT_API = "https://api.gateio.ws/api/v4"
 GATE_SPOT_WS = "wss://api.gateio.ws/ws/v4/"
 GATE_SPOT_WS_TESTNET = "wss://ws-testnet.gate.io/v4/ws/spot"
-KLINE_SIZE = 60
 QUOTES = ("USDT", "BTC", "ETH", "USDC")
 
 
@@ -54,6 +53,12 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class GateSpotConnector(BaseCEXSpotConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    DEPTH_API_MAX = 100
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -68,7 +73,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = GATE_SPOT_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 
@@ -101,10 +106,10 @@ class GateSpotConnector(BaseCEXSpotConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -239,7 +244,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         try:
             data = self._get(
                 "/spot/order_book",
-                {"currency_pair": cp, "limit": str(min(limit, 100))},
+                {"currency_pair": cp, "limit": str(min(limit, self.DEPTH_API_MAX))},
             )
         except Exception:
             return None
@@ -268,7 +273,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
                 {
                     "currency_pair": cp,
                     "interval": "1m",
-                    "limit": str(KLINE_SIZE),
+                    "limit": str(self.KLINE_SIZE),
                 },
             )
         except Exception:

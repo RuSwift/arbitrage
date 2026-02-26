@@ -23,7 +23,6 @@ from app.cex.dto import (
 
 HTX_API_HOST = "https://api.huobi.pro"
 HTX_WS_URL = "wss://api.huobi.pro/ws/"
-KLINE_SIZE = 60
 QUOTES = ("USDT", "BTC", "ETH", "USDC", "TUSD", "HT")
 
 
@@ -51,6 +50,12 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class HtxSpotConnector(BaseCEXSpotConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    DEPTH_API_MAX = 20
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -65,7 +70,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = HTX_API_HOST + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 
@@ -95,10 +100,10 @@ class HtxSpotConnector(BaseCEXSpotConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
@@ -200,7 +205,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             return None
         data = self._get(
             "/market/depth",
-            {"symbol": ex_sym.lower(), "type": "step0", "depth": str(min(limit, 20))},
+            {"symbol": ex_sym.lower(), "type": "step0", "depth": str(min(limit, self.DEPTH_API_MAX))},
         )
         if "tick" not in data:
             raise RuntimeError(data.get("err-msg", "Failed to get depth"))
@@ -222,7 +227,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             return None
         data = self._get(
             "/market/history/kline",
-            {"symbol": ex_sym.lower(), "period": "1min", "size": str(KLINE_SIZE)},
+            {"symbol": ex_sym.lower(), "period": "1min", "size": str(self.KLINE_SIZE)},
         )
         if "data" not in data:
             raise RuntimeError(data.get("err-msg", "Failed to get klines"))

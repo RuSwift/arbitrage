@@ -22,7 +22,6 @@ from app.cex.dto import (
 
 MEXC_SPOT_API = "https://api.mexc.com"
 MEXC_SPOT_WS = "wss://wbs-api.mexc.com/ws"
-KLINE_SIZE = 60
 QUOTES = ("USDT", "USDC", "BTC", "ETH")
 
 
@@ -55,6 +54,11 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 
 
 class MexcSpotConnector(BaseCEXSpotConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    DEPTH_API_MAX = 5000
+    KLINE_SIZE = 60
+    DEPTH_POLL_INTERVAL_SEC = 1
+
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_tickers: list[Ticker] | None = None
@@ -73,7 +77,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = MEXC_SPOT_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if isinstance(data, dict) and "code" in data and data.get("code") != 200 and data.get("code") != 0:
@@ -91,7 +95,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
         if not self._cached_tickers_dict:
             self.get_all_tickers()
         if symbols is None:
-            syms = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol][:200]
+            syms = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol]
         else:
             syms = [
                 t.exchange_symbol
@@ -155,7 +159,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
                                 utc=_utc_now_float(),
                             )
                         )
-            time.sleep(1)
+            time.sleep(self.DEPTH_POLL_INTERVAL_SEC)
 
     def stop(self) -> None:
         self._poll_run = False
@@ -273,7 +277,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
         if not ex_sym:
             return None
         try:
-            data = self._get("/api/v3/depth", {"symbol": ex_sym, "limit": str(min(limit, 5000))})
+            data = self._get("/api/v3/depth", {"symbol": ex_sym, "limit": str(min(limit, self.DEPTH_API_MAX))})
         except Exception:
             return None
         if not data or not isinstance(data, dict):
@@ -296,7 +300,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
         if not ex_sym:
             return None
         try:
-            data = self._get("/api/v3/klines", {"symbol": ex_sym, "interval": "1m", "limit": str(KLINE_SIZE)})
+            data = self._get("/api/v3/klines", {"symbol": ex_sym, "interval": "1m", "limit": str(self.KLINE_SIZE)})
         except Exception:
             return None
         if not isinstance(data, list):
@@ -305,7 +309,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for row in data[:KLINE_SIZE]:
+        for row in data[: self.KLINE_SIZE]:
             if not isinstance(row, list) or len(row) < 7:
                 continue
             ts, o, h, l, c, vol = row[0], row[1], row[2], row[3], row[4], row[5]

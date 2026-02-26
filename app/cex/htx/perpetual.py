@@ -23,7 +23,6 @@ from app.cex.dto import (
 
 HTX_LINEAR_API = "https://api.hbdm.com"
 HTX_LINEAR_WS = "wss://api.hbdm.com/linear-swap-ws"
-KLINE_SIZE = 60
 
 
 def _utc_now_float() -> float:
@@ -45,6 +44,11 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 
 
 class HtxPerpetualConnector(BaseCEXPerpetualConnector):
+    REQUEST_TIMEOUT_SEC = 15
+    KLINE_SIZE = 60
+    WS_CONNECT_WAIT_ATTEMPTS = 10
+    WS_CONNECT_WAIT_SEC = 1
+    WS_CONNECT_BACKOFF_SEC = 0.5
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -59,7 +63,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = HTX_LINEAR_API + path
-        r = requests.get(url, params=params or {}, timeout=15)
+        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 
@@ -89,15 +93,15 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
         self._ws_thread.daemon = True
         self._ws_thread.start()
-        for _ in range(10):
+        for _ in range(self.WS_CONNECT_WAIT_ATTEMPTS):
             if self._ws.sock and self._ws.sock.connected:
                 break
-            time.sleep(1)
+            time.sleep(self.WS_CONNECT_WAIT_SEC)
         if not self._ws.sock or not self._ws.sock.connected:
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("HTX linear WebSocket connection failed.")
-        time.sleep(0.5)
+        time.sleep(self.WS_CONNECT_BACKOFF_SEC)
         for contract in syms:
             self._ws.send(
                 json.dumps(
@@ -155,7 +159,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         base, quote = symbol.split("/")
         return CurrencyPair(
             base=base,
-            quota=quote,
+            quote=quote,
             ratio=float(tick.get("close", 0)),
             utc=_utc_now_float(),
         )
@@ -166,28 +170,32 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         if symbols is None:
             contracts = [t.exchange_symbol for t in self._cached_perps]
         else:
+            sym_set = set(symbols)
             contracts = [
                 t.exchange_symbol
                 for t in self._cached_perps
-                if t.symbol in symbols or t.exchange_symbol in symbols
+                if t.symbol in sym_set or t.exchange_symbol in sym_set
             ]
         if not contracts:
             return []
-        data = self._get(
-            "/linear-swap-ex/market/detail/batch_merged",
-            {"contract_code": ",".join(contracts)},
-        )
-        if data.get("status") != "ok" or "tick" not in data:
-            raise RuntimeError(data.get("err_msg", "Failed to get tickers"))
+        # HTX batch_merged is unreliable; use single merged per contract
         pairs: list[CurrencyPair] = []
-        for tick in data["tick"]:
-            contract = tick.get("contract_code", "")
+        for contract in contracts:
+            data = self._get(
+                "/linear-swap-ex/market/detail/merged",
+                {"contract_code": contract},
+            )
+            if data.get("status") != "ok" or "tick" not in data:
+                continue
+            tick = data["tick"]
             t = self._cached_perps_dict.get(contract)
             if not t:
                 continue
             close = float(tick.get("close", 0))
             pairs.append(
-                CurrencyPair(base=t.base, quota=t.quote, ratio=close, utc=_utc_now_float())
+                CurrencyPair(
+                    base=t.base, quote=t.quote, ratio=close, utc=_utc_now_float()
+                )
             )
         return pairs
 
@@ -219,7 +227,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         data = self._get(
             "/linear-swap-ex/market/history/kline",
-            {"contract_code": contract, "period": "1min", "size": str(KLINE_SIZE)},
+            {"contract_code": contract, "period": "1min", "size": str(self.KLINE_SIZE)},
         )
         if data.get("status") != "ok" or "data" not in data:
             raise RuntimeError(data.get("err_msg", "Failed to get klines"))

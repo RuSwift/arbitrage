@@ -48,16 +48,19 @@ def valid_pair_code() -> str:
 
 
 class TestPerpetualConnector:
+    @pytest.mark.timeout(15)
     def test_get_all_perpetuals(self, connector: BaseCEXPerpetualConnector) -> None:
         perps = connector.get_all_perpetuals()
         assert len(perps) > 0
         common_check_perpetual_ticker(perps[0])
 
+    @pytest.mark.timeout(15)
     def test_get_pairs(self, connector: BaseCEXPerpetualConnector) -> None:
         pairs = connector.get_pairs()
         assert len(pairs) > 0
         common_check_currency_pair(pairs[0])
 
+    @pytest.mark.timeout(15)
     def test_get_price(
         self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
     ) -> None:
@@ -66,6 +69,7 @@ class TestPerpetualConnector:
         common_check_currency_pair(pair)
         assert connector.get_price("XXX/BTC") is None
 
+    @pytest.mark.timeout(15)
     def test_get_depth(
         self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
     ) -> None:
@@ -75,6 +79,7 @@ class TestPerpetualConnector:
         assert len(book.asks) > 0
         common_check_book_depth(book)
 
+    @pytest.mark.timeout(15)
     def test_get_klines(
         self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
     ) -> None:

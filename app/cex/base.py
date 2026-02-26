@@ -17,6 +17,7 @@ from app.cex.throttler import Throttler
 from app.settings import Settings
 
 DEFAULT_THROTTLE_TIMEOUT = 1.0
+DEFAULT_DEPTH_LIMIT = 100  # default get_depth(limit=...) when not specified
 
 
 class Callback(ABC):
@@ -81,7 +82,7 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
         ...
 
     @abstractmethod
-    def get_depth(self, symbol: str, limit: int = 100) -> BookDepth | None:
+    def get_depth(self, symbol: str, limit: int = DEFAULT_DEPTH_LIMIT) -> BookDepth | None:
         ...
 
     @abstractmethod
@@ -126,7 +127,7 @@ class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
         ...
 
     @abstractmethod
-    def get_depth(self, symbol: str, limit: int = 100) -> BookDepth | None:
+    def get_depth(self, symbol: str, limit: int = DEFAULT_DEPTH_LIMIT) -> BookDepth | None:
         ...
 
     @abstractmethod
