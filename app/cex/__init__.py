@@ -6,9 +6,13 @@ from app.cex.base import (
     Callback,
 )
 from app.cex.binance import BinancePerpetualConnector, BinanceSpotConnector
+from app.cex.bitfinex import BitfinexPerpetualConnector, BitfinexSpotConnector
 from app.cex.bybit import BybitPerpetualConnector, BybitSpotConnector
 from app.cex.gate import GatePerpetualConnector, GateSpotConnector
 from app.cex.htx import HtxPerpetualConnector, HtxSpotConnector
+from app.cex.kucoin import KucoinPerpetualConnector, KucoinSpotConnector
+from app.cex.mexc import MexcPerpetualConnector, MexcSpotConnector
+from app.cex.okx import OkxPerpetualConnector, OkxSpotConnector
 from app.cex.dto import (
     BidAsk,
     BookDepth,
@@ -28,12 +32,20 @@ __all__ = [
     "Callback",
     "BinanceSpotConnector",
     "BinancePerpetualConnector",
+    "BitfinexSpotConnector",
+    "BitfinexPerpetualConnector",
     "BybitSpotConnector",
     "BybitPerpetualConnector",
     "GateSpotConnector",
     "GatePerpetualConnector",
     "HtxSpotConnector",
     "HtxPerpetualConnector",
+    "KucoinSpotConnector",
+    "KucoinPerpetualConnector",
+    "MexcSpotConnector",
+    "MexcPerpetualConnector",
+    "OkxSpotConnector",
+    "OkxPerpetualConnector",
     "BidAsk",
     "BookDepth",
     "BookTicker",
