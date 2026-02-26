@@ -27,6 +27,10 @@ sqlalchemy = "^2.0"
 psycopg2-binary = "^2.9"
 asyncpg = "^0.29"
 python-dotenv = "^1.0"
+redis = "^5.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
 
 [build-system]
 requires = ["poetry-core"]

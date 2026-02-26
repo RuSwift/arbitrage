@@ -14,6 +14,7 @@ from app.cex.dto import (
     WithdrawInfo,
 )
 from app.cex.throttler import Throttler
+from app.settings import Settings
 
 DEFAULT_THROTTLE_TIMEOUT = 1.0
 
@@ -39,7 +40,8 @@ class _BaseCEXConnectorMixin:
         throttle_timeout: float = DEFAULT_THROTTLE_TIMEOUT,
     ) -> None:
         self._is_testing = is_testing
-        self._throttler = Throttler(timeout=throttle_timeout)
+        redis_url = Settings().redis.url
+        self._throttler = Throttler(timeout=throttle_timeout, redis_url=redis_url)
 
 
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
