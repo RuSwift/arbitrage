@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import List
 
 from app.cex.base import Callback
@@ -46,11 +47,23 @@ def common_check_perpetual_ticker(obj: PerpetualTicker) -> None:
     assert obj.settlement
 
 
+def assert_utc_near_now(utc_value: float | None, tolerance_seconds: float = 300) -> None:
+    """If utc is present, assert it is UTC seconds within ±tolerance_seconds of now."""
+    if utc_value is None:
+        return
+    assert isinstance(utc_value, (int, float)), f"utc must be number, got {type(utc_value)}"
+    now = time.time()
+    assert abs(float(utc_value) - now) <= tolerance_seconds, (
+        f"utc {utc_value} not within ±{tolerance_seconds}s of now {now}"
+    )
+
+
 def common_check_currency_pair(obj: CurrencyPair) -> None:
     assert isinstance(obj, CurrencyPair)
     assert obj.base
     assert obj.quote
     assert isinstance(obj.ratio, (int, float))
+    assert_utc_near_now(obj.utc)
 
 
 def common_check_book_ticker(obj: BookTicker) -> None:
@@ -63,6 +76,7 @@ def common_check_book_ticker(obj: BookTicker) -> None:
     assert isinstance(obj.bid_price, (int, float))
     assert obj.last_update_id is not None or True  # optional on some exchanges
     assert obj.utc is None or isinstance(obj.utc, (int, float))
+    assert_utc_near_now(obj.utc)
 
 
 def common_check_book_depth(obj: BookDepth) -> None:
@@ -77,3 +91,4 @@ def common_check_book_depth(obj: BookDepth) -> None:
     assert isinstance(obj.bids[0].quantity, (int, float))
     assert obj.last_update_id is not None or True
     assert obj.utc is None or isinstance(obj.utc, (int, float))
+    assert_utc_near_now(obj.utc)
