@@ -97,8 +97,8 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         if self._ws is not None:
             try:
                 self._ws.exit()
-            except Exception:
-                pass
+            except Exception as e:
+                self.log.debug("stop: ws exit failed: %s", e)
             self._ws = None
         self._cb = None
 
@@ -135,7 +135,8 @@ class BybitSpotConnector(BaseCEXSpotConnector):
             return None
         try:
             r = self._api.get_tickers(category="spot", symbol=sym)
-        except InvalidRequestError:
+        except InvalidRequestError as e:
+            self.log.exception("get_price failed for %s: %s", pair_code, e)
             return None
         if r.get("retCode") != 0:
             return None

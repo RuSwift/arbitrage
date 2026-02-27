@@ -96,8 +96,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         if self._ws is not None:
             try:
                 self._ws.exit()
-            except Exception:
-                pass
+            except Exception as e:
+                self.log.debug("stop: ws exit failed: %s", e)
             self._ws = None
         self._cb = None
 
@@ -148,7 +148,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         try:
             r = self._api.get_tickers(category="linear", symbol=ticker.exchange_symbol)
-        except InvalidRequestError:
+        except InvalidRequestError as e:
+            self.log.exception("get_price failed for %s: %s", symbol, e)
             return None
         if r.get("retCode") != 0:
             return None
@@ -223,7 +224,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         try:
             r = self._api.get_tickers(category="linear", symbol=ex_sym)
-        except InvalidRequestError:
+        except InvalidRequestError as e:
+            self.log.exception("get_pairs failed: %s", e)
             return None
         if r.get("retCode") != 0:
             return None
@@ -258,7 +260,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             r = self._api.get_funding_rate_history(
                 category="linear", symbol=ex_sym, limit=min(n, 200)
             )
-        except (InvalidRequestError, Exception):
+        except (InvalidRequestError, Exception) as e:
+            self.log.exception("get_klines failed for %s: %s", symbol, e)
             return None
         if r.get("retCode") != 0:
             return None

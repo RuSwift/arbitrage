@@ -166,7 +166,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         try:
             r = self._get("/fapi/v1/ticker/price", {"symbol": ex_sym})
         except Exception as e:
-            self.log.warning("get_price failed for %s: %s", symbol, e, exc_info=True)
+            self.log.exception("get_price failed for %s: %s", symbol, e)
             return None
         if not r or "price" not in r:
             return None
@@ -188,7 +188,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         try:
             r = self._get("/fapi/v1/ticker/price")
         except Exception as e:
-            self.log.warning("get_pairs failed: %s", e, exc_info=True)
+            self.log.exception("get_pairs failed: %s", e)
             return []
         if not isinstance(r, list):
             return []
@@ -231,7 +231,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                 {"symbol": ex_sym, "limit": str(min(limit, self.DEPTH_API_MAX))},
             )
         except Exception as e:
-            self.log.warning("get_depth failed for %s: %s", symbol, e, exc_info=True)
+            self.log.exception("get_depth failed for %s: %s", symbol, e)
             return None
         if not r:
             return None
@@ -260,7 +260,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                 "/fapi/v1/klines",
                 {"symbol": ex_sym, "interval": "1m", "limit": str(n)},
             )
-        except Exception:
+        except Exception as e:
+            self.log.exception("get_klines failed for %s: %s", symbol, e)
             return None
         if not rows:
             return None
@@ -288,7 +289,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             return None
         try:
             r = self._get("/fapi/v1/premiumIndex", {"symbol": ex_sym})
-        except Exception:
+        except Exception as e:
+            self.log.exception("get_funding_rate failed for %s: %s", symbol, e)
             return None
         if not r or "lastFundingRate" not in r:
             return None
@@ -314,7 +316,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
         try:
             rows = self._get("/fapi/v1/fundingRate", {"symbol": ex_sym, "limit": str(n)})
-        except Exception:
+        except Exception as e:
+            self.log.exception("get_funding_rate_history failed for %s: %s", symbol, e)
             return None
         if not isinstance(rows, list):
             return None
@@ -343,7 +346,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             raw = raw.decode()
         try:
             msg = json.loads(raw)
-        except Exception:
+        except Exception as e:
+            self.log.exception("_on_ws_message json parse failed: %s", e)
             return
         if "stream" in msg:
             stream = msg.get("stream", "")

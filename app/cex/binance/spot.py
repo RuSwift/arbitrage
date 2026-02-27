@@ -141,7 +141,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         try:
             r = self._api.ticker_price(symbol=ticker.exchange_symbol or sym)
         except Exception as e:
-            self.log.warning("get_price failed for %s: %s", pair_code, e, exc_info=True)
+            self.log.exception("get_price failed for %s: %s", pair_code, e)
             return None
         if not r or "price" not in r:
             return None
@@ -171,7 +171,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                 else:
                     prices = self._api.ticker_price(symbols=sym_list)
         except Exception as e:
-            self.log.warning("get_pairs failed: %s", e, exc_info=True)
+            self.log.exception("get_pairs failed: %s", e)
             return []
         if not isinstance(prices, list):
             prices = [prices]
@@ -199,7 +199,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         try:
             r = self._api.depth(symbol=ex_sym, limit=min(limit, self.DEPTH_API_MAX))
         except Exception as e:
-            self.log.warning("get_depth failed for %s: %s", symbol, e, exc_info=True)
+            self.log.exception("get_depth failed for %s: %s", symbol, e)
             return None
         if not r:
             return None
@@ -230,7 +230,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                 limit=n,
             )
         except Exception as e:
-            self.log.warning("get_klines failed for %s: %s", symbol, e, exc_info=True)
+            self.log.exception("get_klines failed for %s: %s", symbol, e)
             return None
         if not rows:
             return None
@@ -268,7 +268,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         try:
             msg = json.loads(raw)
         except Exception as e:
-            self.log.warning("_on_ws_message json parse failed: %s", e, exc_info=True)
+            self.log.exception("_on_ws_message json parse failed: %s", e)
             return
         if "stream" in msg:
             stream = msg.get("stream", "")
