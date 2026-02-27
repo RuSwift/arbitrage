@@ -370,17 +370,23 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         if not data or not isinstance(data, dict):
             return None
-        rate_val = data.get("value") or data.get("fundingRate") or data.get("nextFundingRate")
+        rate_val = data.get("value") or data.get("fundingRate")
+        next_rate_raw = data.get("nextFundingRate")
         funding_time = data.get("fundingTime")
         if rate_val is None:
             return None
         ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(symbol)
         sym = ticker.symbol if ticker else symbol
         next_utc = float(funding_time) / 1000 if funding_time is not None else 0.0
+        try:
+            next_rate = float(next_rate_raw) if next_rate_raw is not None else None
+        except (TypeError, ValueError):
+            next_rate = None
         return FundingRate(
             symbol=sym,
             rate=float(rate_val),
             next_funding_utc=next_utc,
+            next_rate=next_rate,
             utc=_utc_now_float(),
         )
 

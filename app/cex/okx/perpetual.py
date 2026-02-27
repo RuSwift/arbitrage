@@ -292,15 +292,21 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
         row = data[0] if isinstance(data[0], dict) else {}
         funding_rate = row.get("fundingRate")
         next_ts = row.get("nextFundingTime")
+        next_rate_raw = row.get("nextFundingRate")
         if funding_rate is None:
             return None
         ticker = self._cached_perps_dict.get(inst_id) or self._cached_perps_dict.get(symbol)
         sym = ticker.symbol if ticker else symbol
         next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
+        try:
+            next_rate = float(next_rate_raw) if next_rate_raw is not None else None
+        except (TypeError, ValueError):
+            next_rate = None
         return FundingRate(
             symbol=sym,
             rate=float(funding_rate),
             next_funding_utc=next_utc,
+            next_rate=next_rate,
             utc=_utc_now_float(),
         )
 
