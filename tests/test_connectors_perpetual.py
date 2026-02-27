@@ -21,6 +21,8 @@ from .helpers_connectors import (
     common_check_book_depth,
     common_check_book_ticker,
     common_check_currency_pair,
+    common_check_funding_rate,
+    common_check_funding_rate_point,
     common_check_perpetual_ticker,
 )
 
@@ -90,6 +92,26 @@ class TestPerpetualConnector:
         # Ascending or descending order depends on exchange
         assert klines[0].utc_open_time != klines[-1].utc_open_time
         assert 1 <= len(klines) <= 200
+
+    @pytest.mark.timeout(15)
+    def test_get_funding_rate(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        fr = connector.get_funding_rate(valid_pair_code)
+        assert fr is not None
+        common_check_funding_rate(fr)
+        assert connector.get_funding_rate("XXX/BTC") is None
+
+    @pytest.mark.timeout(15)
+    def test_get_funding_rate_history(
+        self, connector: BaseCEXPerpetualConnector, valid_pair_code: str
+    ) -> None:
+        history = connector.get_funding_rate_history(valid_pair_code, limit=10)
+        assert history is not None
+        assert isinstance(history, list)
+        assert len(history) <= 10
+        if history:
+            common_check_funding_rate_point(history[0])
 
     @pytest.mark.slow
     @pytest.mark.timeout(15)

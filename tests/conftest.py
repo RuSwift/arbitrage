@@ -19,16 +19,16 @@ if _env_file.exists():
 
 @pytest.fixture(scope="session")
 def redis_url():
-    """Redis URL from .env (REDIS_*)."""
-    from app.settings import Settings
-    return Settings().redis.url
+    """Redis URL from .env (REDIS_*). Load only RedisSettings so tests run without COINMARKETCAP_API_KEY."""
+    from app.settings import RedisSettings
+    return RedisSettings().url
 
 
 @pytest.fixture(scope="session")
 def database_url():
     """PostgreSQL URL from .env (DB_*) for future DB tests."""
-    from app.settings import Settings
-    return Settings().database.url
+    from app.settings import DatabaseSettings
+    return DatabaseSettings().url
 
 
 @pytest.fixture

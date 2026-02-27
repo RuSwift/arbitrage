@@ -11,12 +11,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -266,6 +269,50 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                 close_price=float(r[4]),
                 coin_volume=float(r[5]),
                 usd_volume=float(r[5]) * float(r[4]) if usd_vol else None,
+            )
+            for r in rows
+        ]
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        ex_sym = self._exchange_symbol(symbol)
+        if not ex_sym:
+            return None
+        try:
+            r = self._get("/fapi/v1/premiumIndex", {"symbol": ex_sym})
+        except Exception:
+            return None
+        if not r or "lastFundingRate" not in r:
+            return None
+        ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(
+            symbol.replace("/", "")
+        )
+        sym = ticker.symbol if ticker else symbol
+        next_ms = r.get("nextFundingTime")
+        next_utc = float(next_ms) / 1000 if next_ms is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(r["lastFundingRate"]),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        ex_sym = self._exchange_symbol(symbol)
+        if not ex_sym:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            rows = self._get("/fapi/v1/fundingRate", {"symbol": ex_sym, "limit": str(n)})
+        except Exception:
+            return None
+        if not isinstance(rows, list):
+            return None
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(r["fundingTime"]) / 1000,
+                rate=float(r["fundingRate"]),
             )
             for r in rows
         ]

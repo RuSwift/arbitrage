@@ -11,12 +11,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -282,6 +285,60 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
                     close_price=float(c),
                     coin_volume=float(vol),
                     usd_volume=float(vol) * float(c) if usd_vol else None,
+                )
+            )
+        return result
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        ex_sym = self._exchange_symbol(symbol) or _symbol_to_bfx_deriv(symbol)
+        if not ex_sym:
+            return None
+        try:
+            data = self._get("/status/deriv", {"keys": ex_sym})
+        except Exception:
+            return None
+        if not isinstance(data, list) or not data:
+            return None
+        row = data[0] if isinstance(data[0], list) else data
+        if not isinstance(row, list) or len(row) < 12:
+            return None
+        current_funding = row[11] if len(row) > 11 else None
+        next_funding_mts = row[7] if len(row) > 7 else None
+        if current_funding is None:
+            return None
+        ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        next_utc = float(next_funding_mts) / 1000 if next_funding_mts is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(current_funding),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        ex_sym = self._exchange_symbol(symbol) or _symbol_to_bfx_deriv(symbol)
+        if not ex_sym:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            data = self._get(f"/status/deriv/{ex_sym}/hist", {"limit": str(n)})
+        except Exception:
+            return None
+        if not isinstance(data, list):
+            return None
+        result: list[FundingRatePoint] = []
+        for row in data[:n]:
+            if not isinstance(row, list) or len(row) < 12:
+                continue
+            mts = row[0]
+            funding = row[11] if len(row) > 11 else row[2] if len(row) > 2 else 0
+            result.append(
+                FundingRatePoint(
+                    funding_time_utc=float(mts) / 1000,
+                    rate=float(funding),
                 )
             )
         return result

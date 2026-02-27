@@ -11,12 +11,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -269,6 +272,55 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
                 )
             )
         return result
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        inst_id = self._exchange_symbol(symbol) or _symbol_to_okx_swap(symbol)
+        if not inst_id:
+            return None
+        try:
+            data = self._get("/api/v5/public/funding-rate", {"instId": inst_id})
+        except RuntimeError:
+            return None
+        if not data or not isinstance(data, list):
+            return None
+        row = data[0] if isinstance(data[0], dict) else {}
+        funding_rate = row.get("fundingRate")
+        next_ts = row.get("nextFundingTime")
+        if funding_rate is None:
+            return None
+        ticker = self._cached_perps_dict.get(inst_id) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(funding_rate),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        inst_id = self._exchange_symbol(symbol) or _symbol_to_okx_swap(symbol)
+        if not inst_id:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            data = self._get(
+                "/api/v5/public/funding-rate-history",
+                {"instId": inst_id, "limit": str(n)},
+            )
+        except RuntimeError:
+            return None
+        if not isinstance(data, list):
+            return None
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(row["fundingTime"]) / 1000,
+                rate=float(row["fundingRate"]),
+            )
+            for row in data
+        ]
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_perps_dict:

@@ -11,12 +11,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -350,6 +353,57 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             or self._cached_perps_dict.get(symbol.replace("/", ""))
         )
         return t.exchange_symbol if t else None
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        ex_sym = self._exchange_symbol(symbol) or _symbol_to_kucoin_futures(symbol)
+        if not ex_sym:
+            return None
+        try:
+            data = self._get("/api/v1/funding-rate", {"symbol": ex_sym})
+        except Exception:
+            return None
+        if not data or not isinstance(data, dict):
+            return None
+        rate_val = data.get("fundingRate") or data.get("nextFundingRate")
+        funding_time = data.get("fundingTime")
+        if rate_val is None:
+            return None
+        ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        next_utc = float(funding_time) / 1000 if funding_time is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(rate_val),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        ex_sym = self._exchange_symbol(symbol) or _symbol_to_kucoin_futures(symbol)
+        if not ex_sym:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            data = self._get(
+                "/api/v1/contract/funding-rate/history",
+                {"symbol": ex_sym, "from": str(int(_utc_now_float() - n * 8 * 3600)), "to": str(int(_utc_now_float() + 60))},
+            )
+        except Exception:
+            return None
+        if not data:
+            return None
+        lst = data.get("data", {}).get("resultList", data) if isinstance(data, dict) else data
+        if not isinstance(lst, list):
+            lst = []
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(x.get("settleTime", x.get("ts", 0))) / 1000,
+                rate=float(x.get("fundingRate", 0)),
+            )
+            for x in lst[:n]
+        ]
 
     def _on_ws_message(self, _: Any, raw: bytes | str) -> None:
         if not self._cb:

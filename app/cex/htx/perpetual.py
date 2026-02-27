@@ -12,12 +12,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -247,6 +250,61 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
                 )
             )
         return result
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        try:
+            data = self._get("/linear-swap-api/v1/swap_funding_rate", {"contract_code": contract})
+        except Exception:
+            return None
+        if data.get("status") != "ok" or "data" not in data:
+            return None
+        arr = data["data"]
+        if not isinstance(arr, list) or not arr:
+            return None
+        row = arr[0] if isinstance(arr[0], dict) else {}
+        rate_val = row.get("funding_rate")
+        if rate_val is None:
+            return None
+        next_ts = row.get("next_funding_time")
+        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(rate_val),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            data = self._get(
+                "/linear-swap-api/v1/swap_historical_funding_rate",
+                {"contract_code": contract, "size": str(n)},
+            )
+        except Exception:
+            return None
+        if data.get("status") != "ok" or "data" not in data:
+            return None
+        arr = data["data"]
+        if not isinstance(arr, list):
+            return None
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(r.get("funding_time", r.get("settle_time", 0))) / 1000,
+                rate=float(r.get("funding_rate", 0)),
+            )
+            for r in arr
+        ]
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_perps_dict:

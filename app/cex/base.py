@@ -9,6 +9,8 @@ from app.cex.dto import (
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
     Ticker,
     WithdrawInfo,
@@ -19,6 +21,7 @@ from app.settings import Settings
 DEFAULT_THROTTLE_TIMEOUT = 1.0
 DEFAULT_DEPTH_LIMIT = 100  # default get_depth(limit=...) when not specified
 DEFAULT_KLINE_LIMIT = 60  # default get_klines(limit=...) when not specified
+DEFAULT_FUNDING_HISTORY_LIMIT = 100  # default get_funding_rate_history(limit=...) when not specified
 
 
 class Callback(ABC):
@@ -133,4 +136,14 @@ class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
 
     @abstractmethod
     def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
+        ...
+
+    @abstractmethod
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        ...
+
+    @abstractmethod
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
         ...

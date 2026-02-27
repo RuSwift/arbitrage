@@ -11,12 +11,15 @@ import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -322,6 +325,55 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             or self._cached_perps_dict.get(symbol.replace("/", ""))
         )
         return t.exchange_symbol if t else None
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        try:
+            data = self._get(f"/futures/{SETTLE}/funding_rate", {"contract": contract, "limit": "1"})
+        except Exception:
+            return None
+        if not isinstance(data, list) or not data:
+            return None
+        row = data[0] if isinstance(data[0], dict) else {}
+        rate_val = row.get("rate") or row.get("funding_rate")
+        funding_time = row.get("t") or row.get("funding_time") or row.get("time")
+        if rate_val is None:
+            return None
+        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
+        sym = ticker.symbol if ticker else symbol
+        if funding_time is not None and isinstance(funding_time, (int, float)):
+            next_utc = float(funding_time) + 8 * 3600
+        else:
+            next_utc = 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(rate_val),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        contract = self._exchange_symbol(symbol)
+        if not contract:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            data = self._get(f"/futures/{SETTLE}/funding_rate", {"contract": contract, "limit": str(n)})
+        except Exception:
+            return None
+        if not isinstance(data, list):
+            return None
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(row.get("t", row.get("funding_time", row.get("time", 0)))),
+                rate=float(row.get("rate", row.get("funding_rate", 0))),
+            )
+            for row in data
+        ]
 
     def _on_ws_message(self, _: Any, raw: bytes | str) -> None:
         if not self._cb:

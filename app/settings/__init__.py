@@ -100,7 +100,7 @@ class RedisSettings(BaseSettings):
     )
 
     port: int = Field(
-        default=6379,
+        default=6378,
         description="Порт Redis",
     )
 
@@ -135,7 +135,7 @@ class CoinMarketCapSettings(BaseSettings):
     )
 
     api_key: SecretStr = Field(
-        ...,
+        default=SecretStr(""),
         description="API ключ CoinMarketCap (env: COINMARKETCAP_API_KEY)",
     )
 

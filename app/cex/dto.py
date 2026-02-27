@@ -205,3 +205,35 @@ class WithdrawInfo:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WithdrawInfo:
         return _from_dict(cls, data)
+
+
+@dataclass
+class FundingRate:
+    """Current funding rate and next funding time for a perpetual."""
+
+    symbol: str
+    rate: float
+    next_funding_utc: float
+    utc: float | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return _as_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FundingRate:
+        return _from_dict(cls, data)
+
+
+@dataclass
+class FundingRatePoint:
+    """Single point in funding rate history (for chart)."""
+
+    funding_time_utc: float
+    rate: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return _as_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FundingRatePoint:
+        return _from_dict(cls, data)

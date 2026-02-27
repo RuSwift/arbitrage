@@ -6,7 +6,15 @@ import time
 from typing import List
 
 from app.cex.base import Callback
-from app.cex.dto import BookDepth, BookTicker, CurrencyPair, PerpetualTicker, Ticker
+from app.cex.dto import (
+    BookDepth,
+    BookTicker,
+    CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
+    PerpetualTicker,
+    Ticker,
+)
 
 
 class TestableCallback(Callback):
@@ -92,3 +100,20 @@ def common_check_book_depth(obj: BookDepth) -> None:
     assert obj.last_update_id is not None or True
     assert obj.utc is None or isinstance(obj.utc, (int, float))
     assert_utc_near_now(obj.utc)
+
+
+def common_check_funding_rate(obj: FundingRate) -> None:
+    assert isinstance(obj, FundingRate)
+    assert obj.symbol
+    assert "/" in obj.symbol
+    assert isinstance(obj.rate, (int, float))
+    assert isinstance(obj.next_funding_utc, (int, float))
+    assert obj.next_funding_utc >= 0
+    assert obj.utc is None or isinstance(obj.utc, (int, float))
+    assert_utc_near_now(obj.utc)
+
+
+def common_check_funding_rate_point(obj: FundingRatePoint) -> None:
+    assert isinstance(obj, FundingRatePoint)
+    assert isinstance(obj.funding_time_utc, (int, float))
+    assert isinstance(obj.rate, (int, float))

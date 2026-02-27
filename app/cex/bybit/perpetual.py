@@ -9,12 +9,15 @@ from pybit.exceptions import InvalidRequestError
 from pybit.unified_trading import MarketHTTP, WebSocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
+from app.cex.base import DEFAULT_FUNDING_HISTORY_LIMIT
 from app.cex.dto import (
     BidAsk,
     BookDepth,
     BookTicker,
     CandleStick,
     CurrencyPair,
+    FundingRate,
+    FundingRatePoint,
     PerpetualTicker,
 )
 
@@ -207,6 +210,62 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             raise RuntimeError(r.get("retMsg", "Failed to get klines"))
         items = r.get("result", {}).get("list", [])
         return [self._parse_candle(symbol, i) for i in items]
+
+    def get_funding_rate(self, symbol: str) -> FundingRate | None:
+        ex_sym = self._exchange_symbol(symbol)
+        if not ex_sym:
+            return None
+        try:
+            r = self._api.get_tickers(category="linear", symbol=ex_sym)
+        except InvalidRequestError:
+            return None
+        if r.get("retCode") != 0:
+            return None
+        lst = r.get("result", {}).get("list", [])
+        if not lst:
+            return None
+        rec = lst[0]
+        funding_rate = rec.get("fundingRate")
+        next_ts = rec.get("nextFundingTime")
+        if funding_rate is None:
+            return None
+        ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(
+            symbol.replace("/", "")
+        )
+        sym = ticker.symbol if ticker else symbol
+        next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
+        return FundingRate(
+            symbol=sym,
+            rate=float(funding_rate),
+            next_funding_utc=next_utc,
+            utc=_utc_now_float(),
+        )
+
+    def get_funding_rate_history(
+        self, symbol: str, limit: int | None = None
+    ) -> list[FundingRatePoint] | None:
+        ex_sym = self._exchange_symbol(symbol)
+        if not ex_sym:
+            return None
+        n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        try:
+            r = self._api.get_funding_rate_history(
+                category="linear", symbol=ex_sym, limit=min(n, 200)
+            )
+        except (InvalidRequestError, Exception):
+            return None
+        if r.get("retCode") != 0:
+            return None
+        items = r.get("result", {}).get("list", [])
+        if not isinstance(items, list):
+            return None
+        return [
+            FundingRatePoint(
+                funding_time_utc=float(x["fundingRateTimestamp"]) / 1000,
+                rate=float(x["fundingRate"]),
+            )
+            for x in items
+        ]
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_perps_dict:
