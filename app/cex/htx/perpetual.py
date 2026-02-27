@@ -222,13 +222,14 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             utc=float(tick.get("ts", 0)) / 1000,
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         contract = self._exchange_symbol(symbol)
         if not contract:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         data = self._get(
             "/linear-swap-ex/market/history/kline",
-            {"contract_code": contract, "period": "1min", "size": str(self.KLINE_SIZE)},
+            {"contract_code": contract, "period": "1min", "size": str(n)},
         )
         if data.get("status") != "ok" or "data" not in data:
             raise RuntimeError(data.get("err_msg", "Failed to get klines"))

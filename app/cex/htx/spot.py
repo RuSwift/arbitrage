@@ -221,13 +221,14 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             utc=float(tick["ts"]) / 1000,
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         data = self._get(
             "/market/history/kline",
-            {"symbol": ex_sym.lower(), "period": "1min", "size": str(self.KLINE_SIZE)},
+            {"symbol": ex_sym.lower(), "period": "1min", "size": str(n)},
         )
         if "data" not in data:
             raise RuntimeError(data.get("err-msg", "Failed to get klines"))

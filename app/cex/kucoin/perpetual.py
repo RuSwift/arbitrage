@@ -298,13 +298,14 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol) or _symbol_to_kucoin_futures(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         # KuCoin futures uses /api/v1/kline/query with startAt/endAt (ms)
         end_ms = int(_utc_now_float() * 1000)
-        start_ms = end_ms - self.KLINE_SIZE * 60 * 1000
+        start_ms = end_ms - n * 60 * 1000
         try:
             data = self._get(
                 "/api/v1/kline/query",
@@ -323,7 +324,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for row in data[: self.KLINE_SIZE]:
+        for row in data[:n]:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             ts, o, h, l, c, vol = row[0], row[1], row[2], row[3], row[4], row[5]

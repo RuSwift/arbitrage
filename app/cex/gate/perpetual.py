@@ -270,14 +270,15 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         contract = self._exchange_symbol(symbol)
         if not contract:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         try:
             data = self._get(
                 f"/futures/{SETTLE}/candlesticks",
-                {"contract": contract, "interval": "1m", "limit": str(self.KLINE_SIZE)},
+                {"contract": contract, "interval": "1m", "limit": str(n)},
             )
         except Exception:
             return None

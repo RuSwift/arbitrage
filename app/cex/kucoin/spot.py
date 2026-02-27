@@ -298,10 +298,11 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol) or _symbol_to_kucoin(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         try:
             data = self._get(
                 "/api/v1/market/candles",
@@ -315,7 +316,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for row in data[: self.KLINE_SIZE]:
+        for row in data[:n]:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             ts, o, c, h, l, vol = row[0], row[1], row[2], row[3], row[4], row[5]

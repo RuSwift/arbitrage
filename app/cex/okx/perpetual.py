@@ -200,13 +200,17 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
             if not ticker:
                 continue
             last = row.get("last")
-            if last is None:
+            if last is None or last == "":
+                continue
+            try:
+                ratio = float(last)
+            except (TypeError, ValueError):
                 continue
             result.append(
                 CurrencyPair(
                     base=ticker.base,
                     quote=ticker.quote,
-                    ratio=float(last),
+                    ratio=ratio,
                     utc=_utc_now_float(),
                 )
             )
@@ -233,13 +237,14 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         inst_id = self._exchange_symbol(symbol) or _symbol_to_okx_swap(symbol)
         if not inst_id:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         data = self._get(
             "/api/v5/market/candles",
-            {"instId": inst_id, "bar": "1m", "limit": str(self.KLINE_SIZE)},
+            {"instId": inst_id, "bar": "1m", "limit": str(n)},
         )
         if not isinstance(data, list):
             return None

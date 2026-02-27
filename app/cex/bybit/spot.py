@@ -182,15 +182,16 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         _, depth = self._raw_to_events(data)
         return depth
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         r = self._api.get_kline(
             category="spot",
             symbol=ex_sym,
             interval="1",
-            limit=self.KLINE_SIZE,
+            limit=n,
         )
         if r.get("retCode") != 0:
             raise RuntimeError(r.get("retMsg", "Failed to get klines"))

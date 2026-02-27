@@ -238,13 +238,14 @@ class OkxSpotConnector(BaseCEXSpotConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         inst_id = self._exchange_symbol(symbol) or _symbol_to_okx(symbol)
         if not inst_id:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         data = self._get(
             "/api/v5/market/candles",
-            {"instId": inst_id, "bar": "1m", "limit": str(self.KLINE_SIZE)},
+            {"instId": inst_id, "bar": "1m", "limit": str(n)},
         )
         if not isinstance(data, list):
             return None

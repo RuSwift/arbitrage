@@ -258,10 +258,11 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol) or _symbol_to_mexc_contract(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         try:
             data = self._get(f"/api/v1/contract/kline/{ex_sym}", {"interval": "Min1"})
         except Exception:
@@ -280,7 +281,7 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
         quote = ticker.quote if ticker else ""
         usd_vol = quote in QUOTES
         result: list[CandleStick] = []
-        for i in range(min(self.KLINE_SIZE, len(times))):
+        for i in range(min(n, len(times))):
             o = opens[i] if i < len(opens) else 0
             h = highs[i] if i < len(highs) else 0
             l = lows[i] if i < len(lows) else 0

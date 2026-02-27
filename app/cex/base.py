@@ -18,6 +18,7 @@ from app.settings import Settings
 
 DEFAULT_THROTTLE_TIMEOUT = 1.0
 DEFAULT_DEPTH_LIMIT = 100  # default get_depth(limit=...) when not specified
+DEFAULT_KLINE_LIMIT = 60  # default get_klines(limit=...) when not specified
 
 
 class Callback(ABC):
@@ -86,7 +87,7 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
         ...
 
     @abstractmethod
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ...
 
     def get_withdraw_info(self) -> dict[str, list[WithdrawInfo]] | None:
@@ -131,5 +132,5 @@ class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
         ...
 
     @abstractmethod
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ...

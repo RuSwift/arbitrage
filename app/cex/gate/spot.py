@@ -263,17 +263,18 @@ class GateSpotConnector(BaseCEXSpotConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         cp = self._exchange_symbol(symbol)
         if not cp:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         try:
             data = self._get(
                 "/spot/candlesticks",
                 {
                     "currency_pair": cp,
                     "interval": "1m",
-                    "limit": str(self.KLINE_SIZE),
+                    "limit": str(n),
                 },
             )
         except Exception:

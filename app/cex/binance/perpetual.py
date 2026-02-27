@@ -238,14 +238,15 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             utc=_utc_now_float(),
         )
 
-    def get_klines(self, symbol: str) -> list[CandleStick] | None:
+    def get_klines(self, symbol: str, limit: int | None = None) -> list[CandleStick] | None:
         ex_sym = self._exchange_symbol(symbol)
         if not ex_sym:
             return None
+        n = limit if limit is not None else self.KLINE_SIZE
         try:
             rows = self._get(
                 "/fapi/v1/klines",
-                {"symbol": ex_sym, "interval": "1m", "limit": str(self.KLINE_SIZE)},
+                {"symbol": ex_sym, "interval": "1m", "limit": str(n)},
             )
         except Exception:
             return None
