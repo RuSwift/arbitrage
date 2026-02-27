@@ -198,13 +198,17 @@ class OkxSpotConnector(BaseCEXSpotConnector):
             if not ticker:
                 continue
             last = row.get("last")
-            if last is None:
+            if last is None or last == "":
+                continue
+            try:
+                ratio = float(last)
+            except (ValueError, TypeError):
                 continue
             result.append(
                 CurrencyPair(
                     base=ticker.base,
                     quote=ticker.quote,
-                    ratio=float(last),
+                    ratio=ratio,
                     utc=_utc_now_float(),
                 )
             )
