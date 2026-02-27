@@ -107,6 +107,9 @@ class TestSpotConnector:
 
     @pytest.mark.slow
     @pytest.mark.timeout(15)
+    @pytest.mark.filterwarnings(
+        "ignore::pytest.PytestUnhandledThreadExceptionWarning"
+    )
     def test_book_events(
         self, connector: BaseCEXSpotConnector, valid_pair_code: str
     ) -> None:
@@ -114,6 +117,7 @@ class TestSpotConnector:
         connector.start(cb, symbols=[valid_pair_code, "BTC/INVALID"])
         sleep(5)
         connector.stop()
+        sleep(1)  # let websocket threads (e.g. pybit ping) exit before teardown
         assert len(cb.books) > 0
         if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])

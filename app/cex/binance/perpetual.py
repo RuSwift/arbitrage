@@ -313,7 +313,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                     ask_price=float(data.get("a", 0)),
                     ask_qty=float(data.get("A", 0)),
                     last_update_id=data.get("u"),
-                    utc=float(data.get("E", 0)) / 1000,
+                    utc=float(data["E"]) / 1000 if data.get("E") else None,
                 )
             )
         elif "depth" in stream or data.get("e") == "depthUpdate":
@@ -330,6 +330,6 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                     bids=bids,
                     asks=asks,
                     last_update_id=data.get("u"),
-                    utc=float(data.get("E", 0)) / 1000,
+                    utc=float(data["E"]) / 1000 if data.get("E") else None,
                 )
             )

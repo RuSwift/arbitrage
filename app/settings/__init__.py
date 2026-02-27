@@ -123,6 +123,23 @@ class RedisSettings(BaseSettings):
         return f"redis://{self.host}:{self.port}/{self.db}"
 
 
+class CoinMarketCapSettings(BaseSettings):
+    """Настройки CoinMarketCap API. API ключ обязателен (env: COINMARKETCAP_API_KEY)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="COINMARKETCAP_",
+        case_sensitive=False,
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    api_key: SecretStr = Field(
+        ...,
+        description="API ключ CoinMarketCap (env: COINMARKETCAP_API_KEY)",
+    )
+
+
 class Settings(BaseSettings):
     """Основные настройки приложения"""
 
@@ -155,10 +172,12 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
+    coinmarketcap: CoinMarketCapSettings = Field(default_factory=CoinMarketCapSettings)
 
 
 __all__ = [
     "Settings",
     "DatabaseSettings",
     "RedisSettings",
+    "CoinMarketCapSettings",
 ]

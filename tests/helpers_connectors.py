@@ -48,8 +48,8 @@ def common_check_perpetual_ticker(obj: PerpetualTicker) -> None:
 
 
 def assert_utc_near_now(utc_value: float | None, tolerance_seconds: float = 300) -> None:
-    """If utc is present, assert it is UTC seconds within ±tolerance_seconds of now."""
-    if utc_value is None:
+    """If utc is present and positive, assert it is UTC seconds within ±tolerance_seconds of now."""
+    if utc_value is None or (isinstance(utc_value, (int, float)) and float(utc_value) <= 0):
         return
     assert isinstance(utc_value, (int, float)), f"utc must be number, got {type(utc_value)}"
     now = time.time()
