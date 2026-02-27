@@ -58,7 +58,7 @@
         .order-book-divider { flex-shrink: 0; width: 4.5rem; min-width: 4.5rem; background: #1e2329; border-left: 1px solid #2b3139; border-right: 1px solid #2b3139; }
         .order-book-divider-table { width: 100%; }
         .order-book-divider-table th { padding: 0.35rem 0.4rem; color: #848e9c; font-weight: 500; text-align: center; }
-        .order-book-pct-cell { padding: 0.2rem 0.4rem; font-size: 0.7rem; color: #848e9c; text-align: center; white-space: nowrap; }
+        .order-book-divider-table td.order-book-pct-cell { padding: 0.2rem 0.4rem; font-size: 0.7rem; color: #848e9c; text-align: center; white-space: nowrap; }
         .order-book-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
         .order-book-table th { padding: 0.35rem 0.5rem; color: #848e9c; font-weight: 500; text-align: right; }
         .order-book-table th:first-child { text-align: left; }
@@ -75,6 +75,10 @@
         .order-book-combo-cell.bid-price .depth-bar { right: 0; background: rgba(14, 203, 129, 0.2); max-width: 100%; }
         .order-book-combo-cell.ask-price { color: #f6465d; }
         .order-book-combo-cell.ask-price .depth-bar { right: auto; left: 0; background: rgba(246, 70, 93, 0.2); max-width: 100%; }
+        .order-book-asks .order-book-combo-th .ob-usd-label { float: left; }
+        .order-book-asks .order-book-combo-th .ob-price-label { float: right; }
+        .order-book-asks .order-book-combo-cell .ob-usd { float: left; }
+        .order-book-asks .order-book-combo-cell .ob-price { float: right; }
     </style>
 </head>
 <body class="bg-light">
