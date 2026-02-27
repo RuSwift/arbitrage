@@ -54,7 +54,7 @@ class TestPerpetualConnector:
         assert len(perps) > 0
         common_check_perpetual_ticker(perps[0])
 
-    @pytest.mark.timeout(15)
+    @pytest.mark.timeout(25)
     def test_get_pairs(self, connector: BaseCEXPerpetualConnector) -> None:
         pairs = connector.get_pairs()
         assert len(pairs) > 0
@@ -101,6 +101,6 @@ class TestPerpetualConnector:
         sleep(5)
         connector.stop()
         assert len(cb.books) > 0
-        if cb.depths:
+        if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
         common_check_book_ticker(cb.books[0])

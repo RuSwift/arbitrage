@@ -212,7 +212,7 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         if not topic.startswith("orderbook."):
             return
         parts = topic.split(".")
-        depth_level = parts[-1] if len(parts) >= 2 else ""
+        depth_level = parts[1] if len(parts) >= 2 else ""
         data = message.get("data", {})
         if not data:
             return

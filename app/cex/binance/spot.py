@@ -148,21 +148,21 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
     def get_pairs(self, symbols: list[str] | None = None) -> list[CurrencyPair]:
         if not self._cached_tickers_dict:
             self.get_all_tickers()
-        if symbols is None:
-            sym_list = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol]
-        else:
-            sym_list = []
-            for s in symbols:
-                ex = self._exchange_symbol(s) or s.replace("/", "").upper()
-                if ex:
-                    sym_list.append(ex)
-        if not sym_list:
-            return []
         try:
-            if len(sym_list) == 1:
-                prices = [self._api.ticker_price(symbol=sym_list[0])]
+            if symbols is None:
+                prices = self._api.ticker_price()
             else:
-                prices = self._api.ticker_price(symbols=sym_list)
+                sym_list = []
+                for s in symbols:
+                    ex = self._exchange_symbol(s) or s.replace("/", "").upper()
+                    if ex:
+                        sym_list.append(ex)
+                if not sym_list:
+                    return []
+                if len(sym_list) == 1:
+                    prices = [self._api.ticker_price(symbol=sym_list[0])]
+                else:
+                    prices = self._api.ticker_price(symbols=sym_list)
         except Exception:
             return []
         if not isinstance(prices, list):

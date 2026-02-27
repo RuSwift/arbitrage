@@ -167,7 +167,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
         price = float(data["tick"]["data"][0]["price"])
         return CurrencyPair(
             base=base,
-            quota=quote,
+            quote=quote,
             ratio=price,
             utc=_utc_now_float(),
         )
@@ -195,7 +195,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             base, quote = sym.split("/")
             mid = (float(d["bid"]) + float(d["ask"])) / 2
             pairs.append(
-                CurrencyPair(base=base, quota=quote, ratio=mid, utc=ts_ms or _utc_now_float())
+                CurrencyPair(base=base, quote=quote, ratio=mid, utc=ts_ms or _utc_now_float())
             )
         return pairs
 

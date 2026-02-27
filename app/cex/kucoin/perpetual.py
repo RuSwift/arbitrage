@@ -241,7 +241,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         if not self._cached_perps_dict:
             self.get_all_perpetuals()
         try:
-            data = self._get("/api/v1/ticker")
+            data = self._get("/api/v1/allTickers")
         except Exception:
             return []
         ticker_list = data if isinstance(data, list) else []

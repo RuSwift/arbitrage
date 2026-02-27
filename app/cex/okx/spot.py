@@ -159,7 +159,10 @@ class OkxSpotConnector(BaseCEXSpotConnector):
 
     def get_price(self, pair_code: str) -> CurrencyPair | None:
         inst_id = _symbol_to_okx(pair_code)
-        tickers_data = self._get("/api/v5/market/ticker", {"instId": inst_id})
+        try:
+            tickers_data = self._get("/api/v5/market/ticker", {"instId": inst_id})
+        except RuntimeError:
+            return None
         if not tickers_data or not isinstance(tickers_data, list):
             return None
         row = tickers_data[0]

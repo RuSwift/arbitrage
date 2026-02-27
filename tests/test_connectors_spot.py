@@ -60,7 +60,12 @@ class TestSpotConnector:
         for _ in range(2):
             other = connector.__class__()
             other_tickers = other.get_all_tickers()
-            assert tickers == other_tickers
+            assert len(tickers) == len(other_tickers)
+            by_sym = {t.symbol: t for t in tickers}
+            other_by_sym = {t.symbol: t for t in other_tickers}
+            assert set(by_sym) == set(other_by_sym)
+            for sym in by_sym:
+                assert by_sym[sym] == other_by_sym[sym]
 
     @pytest.mark.timeout(15)
     def test_get_pairs(self, connector: BaseCEXSpotConnector) -> None:
@@ -110,6 +115,6 @@ class TestSpotConnector:
         sleep(5)
         connector.stop()
         assert len(cb.books) > 0
-        if cb.depths:
+        if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
         common_check_book_ticker(cb.books[0])

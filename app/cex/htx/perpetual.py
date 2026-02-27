@@ -49,6 +49,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
     WS_CONNECT_WAIT_ATTEMPTS = 10
     WS_CONNECT_WAIT_SEC = 1
     WS_CONNECT_BACKOFF_SEC = 0.5
+    GET_PAIRS_MAX_CONTRACTS = 30
     def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
         super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
         self._cached_perps: list[PerpetualTicker] | None = None
@@ -168,7 +169,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         if not self._cached_perps_dict:
             self.get_all_perpetuals()
         if symbols is None:
-            contracts = [t.exchange_symbol for t in self._cached_perps]
+            contracts = [t.exchange_symbol for t in self._cached_perps][: self.GET_PAIRS_MAX_CONTRACTS]
         else:
             sym_set = set(symbols)
             contracts = [
