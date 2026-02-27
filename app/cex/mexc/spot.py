@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -59,8 +60,13 @@ class MexcSpotConnector(BaseCEXSpotConnector):
     KLINE_SIZE = 60
     DEPTH_POLL_INTERVAL_SEC = 1
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_tickers: list[Ticker] | None = None
         self._cached_tickers_dict: dict[str, Ticker] = {}
         self._ws: websocket.WebSocketApp | None = None

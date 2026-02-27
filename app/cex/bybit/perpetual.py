@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -46,8 +47,13 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
     ORDERBOOK_DEPTH_LEVELS = 50
     INSTRUMENTS_PAGE_LIMIT = 200
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_perps: list[PerpetualTicker] | None = None
         self._cached_perps_dict: dict[str, PerpetualTicker] = {}
         self._api = MarketHTTP(testnet=is_testing)

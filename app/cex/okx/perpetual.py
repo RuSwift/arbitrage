@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -62,8 +63,13 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
     WS_CONNECT_WAIT_ATTEMPTS = 10
     WS_CONNECT_WAIT_SEC = 1
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_perps: list[PerpetualTicker] | None = None
         self._cached_perps_dict: dict[str, PerpetualTicker] = {}
         self._ws: websocket.WebSocketApp | None = None

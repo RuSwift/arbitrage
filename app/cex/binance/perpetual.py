@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -55,8 +56,13 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
     WS_CONNECT_WAIT_ATTEMPTS = 10
     WS_CONNECT_WAIT_SEC = 1
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_perps: list[PerpetualTicker] | None = None
         self._cached_perps_dict: dict[str, PerpetualTicker] = {}
         self._base = BINANCE_FAPI_TESTNET if is_testing else BINANCE_FAPI
@@ -123,8 +129,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         if self._ws is not None:
             try:
                 self._ws.close()
-            except Exception:
-                pass
+            except Exception as e:
+                self.log.debug("stop: ws close failed: %s", e)
             self._ws = None
         self._ws_thread = None
         self._cb = None
@@ -159,7 +165,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             return None
         try:
             r = self._get("/fapi/v1/ticker/price", {"symbol": ex_sym})
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_price failed for %s: %s", symbol, e, exc_info=True)
             return None
         if not r or "price" not in r:
             return None
@@ -180,7 +187,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             self.get_all_perpetuals()
         try:
             r = self._get("/fapi/v1/ticker/price")
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_pairs failed: %s", e, exc_info=True)
             return []
         if not isinstance(r, list):
             return []
@@ -222,7 +230,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                 "/fapi/v1/depth",
                 {"symbol": ex_sym, "limit": str(min(limit, self.DEPTH_API_MAX))},
             )
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_depth failed for %s: %s", symbol, e, exc_info=True)
             return None
         if not r:
             return None

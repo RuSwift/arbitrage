@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 from app.cex.dto import (
@@ -43,6 +44,7 @@ class _BaseCEXConnectorMixin:
         self,
         is_testing: bool = False,
         throttle_timeout: float = DEFAULT_THROTTLE_TIMEOUT,
+        log: logging.Logger | None = None,
     ) -> None:
         self._is_testing = is_testing
         redis_url = Settings().redis.url
@@ -50,6 +52,7 @@ class _BaseCEXConnectorMixin:
         self._throttler = Throttler(
             timeout=throttle_timeout, redis_url=redis_url, key_prefix=key_prefix
         )
+        self.log = log if log is not None else logging.getLogger(self.__class__.__module__)
 
 
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):

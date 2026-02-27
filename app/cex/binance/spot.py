@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
@@ -46,8 +47,13 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
     KLINE_SIZE = 60
     """Number of 1m candles returned by get_klines."""
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_tickers: list[Ticker] | None = None
         self._cached_tickers_dict: dict[str, Ticker] = {}
         base_url = "https://testnet.binance.vision" if is_testing else "https://api.binance.com"
@@ -93,8 +99,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         if self._ws is not None:
             try:
                 self._ws.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                self.log.debug("stop: ws stop failed: %s", e)
             self._ws = None
         self._cb = None
 
@@ -134,7 +140,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             return None
         try:
             r = self._api.ticker_price(symbol=ticker.exchange_symbol or sym)
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_price failed for %s: %s", pair_code, e, exc_info=True)
             return None
         if not r or "price" not in r:
             return None
@@ -163,7 +170,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                     prices = [self._api.ticker_price(symbol=sym_list[0])]
                 else:
                     prices = self._api.ticker_price(symbols=sym_list)
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_pairs failed: %s", e, exc_info=True)
             return []
         if not isinstance(prices, list):
             prices = [prices]
@@ -190,7 +198,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             return None
         try:
             r = self._api.depth(symbol=ex_sym, limit=min(limit, self.DEPTH_API_MAX))
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_depth failed for %s: %s", symbol, e, exc_info=True)
             return None
         if not r:
             return None
@@ -220,7 +229,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                 interval="1m",
                 limit=n,
             )
-        except Exception:
+        except Exception as e:
+            self.log.warning("get_klines failed for %s: %s", symbol, e, exc_info=True)
             return None
         if not rows:
             return None
@@ -257,7 +267,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             return
         try:
             msg = json.loads(raw)
-        except Exception:
+        except Exception as e:
+            self.log.warning("_on_ws_message json parse failed: %s", e, exc_info=True)
             return
         if "stream" in msg:
             stream = msg.get("stream", "")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -47,8 +48,13 @@ class BybitSpotConnector(BaseCEXSpotConnector):
     ORDERBOOK_DEPTH_LEVELS = 50
     """Depth levels for orderbook stream when depth=True."""
 
-    def __init__(self, is_testing: bool = False, throttle_timeout: float = 1.0) -> None:
-        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout)
+    def __init__(
+        self,
+        is_testing: bool = False,
+        throttle_timeout: float = 1.0,
+        log: logging.Logger | None = None,
+    ) -> None:
+        super().__init__(is_testing=is_testing, throttle_timeout=throttle_timeout, log=log)
         self._cached_tickers: list[Ticker] | None = None
         self._cached_tickers_dict: dict[str, Ticker] = {}
         self._api = MarketHTTP(testnet=is_testing)
