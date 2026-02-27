@@ -10,6 +10,26 @@ jobs:
   test:
     name: Test
     runs-on: self-hosted
+    env:
+      # Database (match docker-compose: postgres on 5433, redis on 6378)
+      DB_HOST: localhost
+      DB_PORT: 5433
+      DB_USER: arbitrage
+      DB_PASSWORD: arbitrage
+      DB_DATABASE: arbitrage
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 10
+      DB_POOL_TIMEOUT: 30
+      DB_ECHO: "false"
+      REDIS_HOST: localhost
+      REDIS_PORT: 6378
+      REDIS_PASSWORD: arbitrage-redis-dev
+      REDIS_DB: 0
+      APP_NAME: Arbitrage
+      APP_VERSION: 1.0.0
+      DEBUG: "false"
+      SECRET: ci-secret-key-not-for-test
+      COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
 
     steps:
       - name: Checkout
