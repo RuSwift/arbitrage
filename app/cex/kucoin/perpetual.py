@@ -359,12 +359,12 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         if not ex_sym:
             return None
         try:
-            data = self._get("/api/v1/funding-rate", {"symbol": ex_sym})
+            data = self._get(f"/api/v1/funding-rate/{ex_sym}/current")
         except Exception:
             return None
         if not data or not isinstance(data, dict):
             return None
-        rate_val = data.get("fundingRate") or data.get("nextFundingRate")
+        rate_val = data.get("value") or data.get("fundingRate") or data.get("nextFundingRate")
         funding_time = data.get("fundingTime")
         if rate_val is None:
             return None
@@ -385,21 +385,21 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         if not ex_sym:
             return None
         n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
+        now_ms = int(_utc_now_float() * 1000)
+        start_ms = now_ms - n * 8 * 3600 * 1000  # 8h funding interval
         try:
             data = self._get(
-                "/api/v1/contract/funding-rate/history",
-                {"symbol": ex_sym, "from": str(int(_utc_now_float() - n * 8 * 3600)), "to": str(int(_utc_now_float() + 60))},
+                "/api/v1/contract/funding-rates",
+                {"symbol": ex_sym, "from": str(start_ms), "to": str(now_ms + 60_000)},
             )
         except Exception:
             return None
-        if not data:
-            return None
-        lst = data.get("data", {}).get("resultList", data) if isinstance(data, dict) else data
-        if not isinstance(lst, list):
-            lst = []
+        # _get returns response["data"], which for this endpoint is the list
+        lst = data if isinstance(data, list) else []
+        # API returns [{ timepoint (ms), fundingRate }, ...]
         return [
             FundingRatePoint(
-                funding_time_utc=float(x.get("settleTime", x.get("ts", 0))) / 1000,
+                funding_time_utc=float(x.get("timepoint", x.get("settleTime", x.get("ts", 0)))) / 1000,
                 rate=float(x.get("fundingRate", 0)),
             )
             for x in lst[:n]

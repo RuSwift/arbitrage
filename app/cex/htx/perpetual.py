@@ -261,10 +261,13 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         if data.get("status") != "ok" or "data" not in data:
             return None
-        arr = data["data"]
-        if not isinstance(arr, list) or not arr:
+        payload = data["data"]
+        if isinstance(payload, list):
+            row = payload[0] if payload and isinstance(payload[0], dict) else {}
+        elif isinstance(payload, dict):
+            row = payload
+        else:
             return None
-        row = arr[0] if isinstance(arr[0], dict) else {}
         rate_val = row.get("funding_rate")
         if rate_val is None:
             return None
@@ -295,16 +298,22 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         if data.get("status") != "ok" or "data" not in data:
             return None
-        arr = data["data"]
+        outer = data["data"]
+        if isinstance(outer, dict) and "data" in outer:
+            arr = outer["data"]
+        else:
+            arr = outer if isinstance(outer, list) else [outer] if isinstance(outer, dict) else []
         if not isinstance(arr, list):
             return None
-        return [
+        # HTX (Jan 2024): rate = average premium index; estimated_rate/realized_rate are null.
+        result = [
             FundingRatePoint(
                 funding_time_utc=float(r.get("funding_time", r.get("settle_time", 0))) / 1000,
-                rate=float(r.get("funding_rate", 0)),
+                rate=float(r.get("avg_premium_index", r.get("funding_rate", 0)) or 0),
             )
             for r in arr
         ]
+        return result[:n]
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_perps_dict:

@@ -334,15 +334,27 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             data = self._get(f"/futures/{SETTLE}/funding_rate", {"contract": contract, "limit": "1"})
         except Exception:
             return None
-        if not isinstance(data, list) or not data:
-            return None
-        row = data[0] if isinstance(data[0], dict) else {}
-        rate_val = row.get("rate") or row.get("funding_rate")
-        funding_time = row.get("t") or row.get("funding_time") or row.get("time")
-        if rate_val is None:
+        if not isinstance(data, list):
             return None
         ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
         sym = ticker.symbol if ticker else symbol
+        if not data:
+            return FundingRate(
+                symbol=sym,
+                rate=0.0,
+                next_funding_utc=0.0,
+                utc=_utc_now_float(),
+            )
+        row = data[0] if isinstance(data[0], dict) else {}
+        rate_val = row.get("r") or row.get("rate") or row.get("funding_rate")
+        funding_time = row.get("t") or row.get("funding_time") or row.get("time")
+        if rate_val is None:
+            return FundingRate(
+                symbol=sym,
+                rate=0.0,
+                next_funding_utc=0.0,
+                utc=_utc_now_float(),
+            )
         if funding_time is not None and isinstance(funding_time, (int, float)):
             next_utc = float(funding_time) + 8 * 3600
         else:
@@ -370,7 +382,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         return [
             FundingRatePoint(
                 funding_time_utc=float(row.get("t", row.get("funding_time", row.get("time", 0)))),
-                rate=float(row.get("rate", row.get("funding_rate", 0))),
+                rate=float(row.get("r", row.get("rate", row.get("funding_rate", 0)))),
             )
             for row in data
         ]

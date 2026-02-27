@@ -300,10 +300,10 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         if not isinstance(data, list) or not data:
             return None
         row = data[0] if isinstance(data[0], list) else data
-        if not isinstance(row, list) or len(row) < 12:
+        if not isinstance(row, list) or len(row) < 13:
             return None
-        current_funding = row[11] if len(row) > 11 else None
-        next_funding_mts = row[7] if len(row) > 7 else None
+        current_funding = row[12] if len(row) > 12 else None
+        next_funding_mts = row[8] if len(row) > 8 else None
         if current_funding is None:
             return None
         ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(symbol)
@@ -331,14 +331,17 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         result: list[FundingRatePoint] = []
         for row in data[:n]:
-            if not isinstance(row, list) or len(row) < 12:
+            if not isinstance(row, list) or len(row) <= 8:
                 continue
             mts = row[0]
-            funding = row[11] if len(row) > 11 else row[2] if len(row) > 2 else 0
+            funding = row[8]  # hist: funding rate at index 8 (current status uses 12)
+            if mts is None:
+                continue
+            rate_val = 0.0 if funding is None else float(funding)
             result.append(
                 FundingRatePoint(
                     funding_time_utc=float(mts) / 1000,
-                    rate=float(funding),
+                    rate=rate_val,
                 )
             )
         return result

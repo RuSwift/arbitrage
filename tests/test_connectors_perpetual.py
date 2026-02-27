@@ -44,9 +44,23 @@ def connector(request, redis_client) -> BaseCEXPerpetualConnector:
     return request.param()
 
 
+@pytest.fixture(scope="session")
+def perps_cache() -> dict:
+    """Cache of get_all_perpetuals() per exchange for the test session."""
+    return {}
+
+
 @pytest.fixture
-def valid_pair_code() -> str:
-    return "BTC/USDT"
+def valid_pair_code(
+    connector: BaseCEXPerpetualConnector, perps_cache: dict
+) -> str:
+    """First available perpetual symbol for this exchange (cached per session)."""
+    key = connector.exchange_id()
+    if key not in perps_cache:
+        perps_cache[key] = connector.get_all_perpetuals()
+    perps = perps_cache[key]
+    assert len(perps) > 0
+    return perps[0].symbol
 
 
 class TestPerpetualConnector:
@@ -99,6 +113,8 @@ class TestPerpetualConnector:
     ) -> None:
         fr = connector.get_funding_rate(valid_pair_code)
         assert fr is not None
+        assert fr.rate is not None, "funding rate must not be empty"
+        assert fr.rate != 0.0, "funding rate must not be zero"
         common_check_funding_rate(fr)
         assert connector.get_funding_rate("XXX/BTC") is None
 
@@ -111,7 +127,10 @@ class TestPerpetualConnector:
         assert isinstance(history, list)
         assert len(history) <= 10
         if history:
-            common_check_funding_rate_point(history[0])
+            pt = history[0]
+            common_check_funding_rate_point(pt)
+            assert pt.rate is not None, "funding rate point rate must not be empty"
+            assert pt.rate != 0.0, "funding rate point rate must not be zero"
 
     @pytest.mark.slow
     @pytest.mark.timeout(15)
