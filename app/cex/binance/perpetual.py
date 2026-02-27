@@ -300,10 +300,15 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         sym = ticker.symbol if ticker else symbol
         next_ms = r.get("nextFundingTime")
         next_utc = float(next_ms) / 1000 if next_ms is not None else 0.0
+        try:
+            index_price = float(r["indexPrice"]) if r.get("indexPrice") is not None else None
+        except (TypeError, ValueError):
+            index_price = None
         return FundingRate(
             symbol=sym,
             rate=float(r["lastFundingRate"]),
             next_funding_utc=next_utc,
+            index_price=index_price,
             utc=_utc_now_float(),
         )
 

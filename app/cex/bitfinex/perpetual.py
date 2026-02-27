@@ -310,15 +310,21 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         current_funding = row[12] if len(row) > 12 else None
         next_funding_mts = row[8] if len(row) > 8 else None
+        spot_price = row[4] if len(row) > 4 else None  # SPOT_PRICE (index price)
         if current_funding is None:
             return None
         ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(symbol)
         sym = ticker.symbol if ticker else symbol
         next_utc = float(next_funding_mts) / 1000 if next_funding_mts is not None else 0.0
+        try:
+            index_price = float(spot_price) if spot_price is not None else None
+        except (TypeError, ValueError):
+            index_price = None
         return FundingRate(
             symbol=sym,
             rate=float(current_funding),
             next_funding_utc=next_utc,
+            index_price=index_price,
             utc=_utc_now_float(),
         )
 

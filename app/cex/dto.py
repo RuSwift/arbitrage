@@ -215,6 +215,7 @@ class FundingRate:
     rate: float
     next_funding_utc: float
     next_rate: float | None = None
+    index_price: float | None = None
     utc: float | None = None
 
     def as_dict(self) -> dict[str, Any]:

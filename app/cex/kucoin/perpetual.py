@@ -382,11 +382,17 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             next_rate = float(next_rate_raw) if next_rate_raw is not None else None
         except (TypeError, ValueError):
             next_rate = None
+        idx_px = data.get("indexPrice")
+        try:
+            index_price = float(idx_px) if idx_px is not None else None
+        except (TypeError, ValueError):
+            index_price = None
         return FundingRate(
             symbol=sym,
             rate=float(rate_val),
             next_funding_utc=next_utc,
             next_rate=next_rate,
+            index_price=index_price,
             utc=_utc_now_float(),
         )
 

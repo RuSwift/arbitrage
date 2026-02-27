@@ -242,10 +242,15 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         )
         sym = ticker.symbol if ticker else symbol
         next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
+        try:
+            index_price = float(rec["indexPrice"]) if rec.get("indexPrice") is not None else None
+        except (TypeError, ValueError):
+            index_price = None
         return FundingRate(
             symbol=sym,
             rate=float(funding_rate),
             next_funding_utc=next_utc,
+            index_price=index_price,
             utc=_utc_now_float(),
         )
 
