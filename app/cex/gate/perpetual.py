@@ -428,22 +428,25 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                 return
             bids = result.get("b", [])
             asks = result.get("a", [])
-            if bids and isinstance(bids[0], dict):
-                bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
-                ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
-            else:
-                # Gate может присылать [["p","s"], [price, qty], ...] — пропускаем нечисловые строки
-                def _to_bidask_rows(rows: list) -> list:
-                    out = []
-                    for row in rows:
-                        if isinstance(row, (list, tuple)) and len(row) >= 2:
-                            try:
-                                out.append(BidAsk(price=float(row[0]), quantity=float(row[1])))
-                            except (TypeError, ValueError):
-                                pass
-                    return out
-                bid_list = _to_bidask_rows(bids)
-                ask_list = _to_bidask_rows(asks)
+
+            def _to_bidask_from_rows(rows: list) -> list:
+                out = []
+                for row in rows:
+                    if isinstance(row, dict):
+                        try:
+                            p, s = row.get("p", 0), row.get("s", 0)
+                            out.append(BidAsk(price=float(p), quantity=float(s)))
+                        except (TypeError, ValueError):
+                            pass  # skip header row {"p": "p", "s": "s"} or invalid
+                    elif isinstance(row, (list, tuple)) and len(row) >= 2:
+                        try:
+                            out.append(BidAsk(price=float(row[0]), quantity=float(row[1])))
+                        except (TypeError, ValueError):
+                            pass  # skip header row ["p", "s"] or invalid
+                return out
+
+            bid_list = _to_bidask_from_rows(bids)
+            ask_list = _to_bidask_from_rows(asks)
             u = result.get("u")
             t = float(result.get("t", 0)) / 1000
             cache = self._depth_cache.setdefault(ticker.symbol, {"bids": None, "asks": None, "u": None, "t": 0.0})
