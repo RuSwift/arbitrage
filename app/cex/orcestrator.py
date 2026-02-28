@@ -1,3 +1,6 @@
+import json
+import math
+import time
 from typing import TYPE_CHECKING, Protocol
 
 from app.cex.dto import (
@@ -15,6 +18,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
+from app.db.models import CurrencyPairSnapshot
 from enum import Enum
 
 class PublishStrategy(Enum):
@@ -191,6 +197,36 @@ class AsyncPerpetualRetriever(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _align_utc(utc: float | None, align_to_minutes: int) -> float | None:
+    """Выравнивает utc к границе align_to_minutes минут (отбрасывает секунды)."""
+    if utc is None:
+        return None
+    interval_sec = align_to_minutes * 60
+    return math.floor(utc / interval_sec) * interval_sec
+
+
+def _price_redis_key(exchange_id: str, kind: str, symbol: str) -> str:
+    return f"arbitrage:orchestrator:price:{exchange_id}:{kind}:{symbol}"
+
+
+def _parse_price_from_redis(raw: bytes | str | None) -> CurrencyPair | None:
+    """Парсит значение из Redis (JSON) в CurrencyPair. Возвращает None если raw пусто или невалидно."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        data = json.loads(raw)
+        return CurrencyPair(
+            base=data["base"],
+            quote=data["quote"],
+            ratio=float(data["ratio"]),
+            utc=data.get("utc"),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class SpotOrchestratorImpl:
     """
     Реализация оркестратора для spot: SpotPublisher + SpotRetriever.
@@ -200,17 +236,55 @@ class SpotOrchestratorImpl:
         self,
         db_session: "Session",
         redis: "Redis",
+        exchange_id: str,
+        kind: str,
+        symbol: str,
         cache_timeout: float = 15,
-        align_to_minutes: int = 1,  # выравнивание timestamp до N минут (timestamp % align_to_minutes == 0)
+        align_to_minutes: int = 1,  # выравнивание timestamp до N минут
     ) -> None:
         self._db_session = db_session
         self._redis = redis
+        self._exchange_id = exchange_id
+        self._kind = kind
+        self._symbol = symbol
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
+        self._db_last_save_stamp: float | None = None
 
     # SpotRetriever
     def get_price(self) -> CurrencyPair | None:
-        raise NotImplementedError
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        pair = _parse_price_from_redis(raw)
+        if pair is not None:
+            return pair
+        record = (
+            self._db_session.query(CurrencyPairSnapshot)
+            .filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+            )
+            .order_by(CurrencyPairSnapshot.id.desc())
+            .first()
+        )
+        if record is None:
+            return None
+        pair = CurrencyPair(
+            base=record.base,
+            quote=record.quote,
+            ratio=record.ratio,
+            utc=record.utc,
+        )
+        value = json.dumps({
+            "base": record.base,
+            "quote": record.quote,
+            "ratio": record.ratio,
+            "utc": record.utc,
+        })
+        self._redis.setex(key, int(self._cache_timeout), value)
+        return pair
 
     def get_depth(self, limit: int = 100) -> BookDepth | None:
         raise NotImplementedError
@@ -223,7 +297,46 @@ class SpotOrchestratorImpl:
 
     # SpotPublisher
     def publish_price(self, ticker: CurrencyPair) -> None:
-        raise NotImplementedError
+        aligned_utc = _align_utc(ticker.utc, self._align_to_minutes)
+        if aligned_utc is None:
+            aligned_utc = _align_utc(time.time(), self._align_to_minutes) or time.time()
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        value = json.dumps({
+            "base": ticker.base,
+            "quote": ticker.quote,
+            "ratio": ticker.ratio,
+            "utc": ticker.utc,
+        })
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        if self._db_last_save_stamp is None or now >= self._db_last_save_stamp + self._cache_timeout:
+            record = self._db_session.query(CurrencyPairSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_utc,
+            ).first()
+            if record is None:
+                record = CurrencyPairSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    base=ticker.base,
+                    quote=ticker.quote,
+                    ratio=ticker.ratio,
+                    utc=ticker.utc,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_utc,
+                )
+                self._db_session.add(record)
+            else:
+                record.base = ticker.base
+                record.quote = ticker.quote
+                record.ratio = ticker.ratio
+                record.utc = ticker.utc
+            self._db_session.commit()
+            self._db_last_save_stamp = now
 
     def publish_book_depth(
         self, book_depth: BookDepth, strategy: PublishStrategy = PublishStrategy.REPLACE
@@ -250,16 +363,55 @@ class AsyncSpotOrchestratorImpl:
         self,
         db_session: "AsyncSession",
         redis: "AsyncRedis",
+        exchange_id: str,
+        kind: str,
+        symbol: str,
         cache_timeout: float = 15,
         align_to_minutes: int = 1,
     ) -> None:
         self._db_session = db_session
         self._redis = redis
+        self._exchange_id = exchange_id
+        self._kind = kind
+        self._symbol = symbol
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
 
     async def get_price(self) -> CurrencyPair | None:
-        raise NotImplementedError
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        pair = _parse_price_from_redis(raw)
+        if pair is not None:
+            return pair
+        stmt = (
+            select(CurrencyPairSnapshot)
+            .where(
+                CurrencyPairSnapshot.exchange_id == self._exchange_id,
+                CurrencyPairSnapshot.kind == self._kind,
+                CurrencyPairSnapshot.symbol == self._symbol,
+                CurrencyPairSnapshot.align_to_minutes == self._align_to_minutes,
+            )
+            .order_by(CurrencyPairSnapshot.id.desc())
+            .limit(1)
+        )
+        result = await self._db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        pair = CurrencyPair(
+            base=record.base,
+            quote=record.quote,
+            ratio=record.ratio,
+            utc=record.utc,
+        )
+        value = json.dumps({
+            "base": record.base,
+            "quote": record.quote,
+            "ratio": record.ratio,
+            "utc": record.utc,
+        })
+        await self._redis.set(key, value, ex=int(self._cache_timeout))
+        return pair
 
     async def get_depth(self, limit: int = 100) -> BookDepth | None:
         raise NotImplementedError
@@ -280,17 +432,55 @@ class PerpetualOrchestratorImpl:
         self,
         db_session: "Session",
         redis: "Redis",
+        exchange_id: str,
+        kind: str,
+        symbol: str,
         cache_timeout: float = 15,
-        align_to_minutes: int = 1,  # выравнивание timestamp до N минут (timestamp % align_to_minutes == 0)
+        align_to_minutes: int = 1,  # выравнивание timestamp до N минут
     ) -> None:
         self._db_session = db_session
         self._redis = redis
+        self._exchange_id = exchange_id
+        self._kind = kind
+        self._symbol = symbol
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
+        self._db_last_save_stamp: float | None = None
 
     # PerpetualRetriever
     def get_price(self) -> CurrencyPair | None:
-        raise NotImplementedError
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        pair = _parse_price_from_redis(raw)
+        if pair is not None:
+            return pair
+        record = (
+            self._db_session.query(CurrencyPairSnapshot)
+            .filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+            )
+            .order_by(CurrencyPairSnapshot.id.desc())
+            .first()
+        )
+        if record is None:
+            return None
+        pair = CurrencyPair(
+            base=record.base,
+            quote=record.quote,
+            ratio=record.ratio,
+            utc=record.utc,
+        )
+        value = json.dumps({
+            "base": record.base,
+            "quote": record.quote,
+            "ratio": record.ratio,
+            "utc": record.utc,
+        })
+        self._redis.setex(key, int(self._cache_timeout), value)
+        return pair
 
     def get_depth(self, limit: int = 100) -> BookDepth | None:
         raise NotImplementedError
@@ -308,7 +498,46 @@ class PerpetualOrchestratorImpl:
 
     # PerpetualPublisher
     def publish_price(self, ticker: CurrencyPair) -> None:
-        raise NotImplementedError
+        aligned_utc = _align_utc(ticker.utc, self._align_to_minutes)
+        if aligned_utc is None:
+            aligned_utc = _align_utc(time.time(), self._align_to_minutes) or time.time()
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        value = json.dumps({
+            "base": ticker.base,
+            "quote": ticker.quote,
+            "ratio": ticker.ratio,
+            "utc": ticker.utc,
+        })
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        if self._db_last_save_stamp is None or now >= self._db_last_save_stamp + self._cache_timeout:
+            record = self._db_session.query(CurrencyPairSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_utc,
+            ).first()
+            if record is None:
+                record = CurrencyPairSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    base=ticker.base,
+                    quote=ticker.quote,
+                    ratio=ticker.ratio,
+                    utc=ticker.utc,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_utc,
+                )
+                self._db_session.add(record)
+            else:
+                record.base = ticker.base
+                record.quote = ticker.quote
+                record.ratio = ticker.ratio
+                record.utc = ticker.utc
+            self._db_session.commit()
+            self._db_last_save_stamp = now
 
     def publish_book_depth(
         self, book_depth: BookDepth, strategy: PublishStrategy = PublishStrategy.REPLACE
@@ -338,16 +567,55 @@ class AsyncPerpetualOrchestratorImpl:
         self,
         db_session: "AsyncSession",
         redis: "AsyncRedis",
+        exchange_id: str,
+        kind: str,
+        symbol: str,
         cache_timeout: float = 15,
         align_to_minutes: int = 1,
     ) -> None:
         self._db_session = db_session
         self._redis = redis
+        self._exchange_id = exchange_id
+        self._kind = kind
+        self._symbol = symbol
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
 
     async def get_price(self) -> CurrencyPair | None:
-        raise NotImplementedError
+        key = _price_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        pair = _parse_price_from_redis(raw)
+        if pair is not None:
+            return pair
+        stmt = (
+            select(CurrencyPairSnapshot)
+            .where(
+                CurrencyPairSnapshot.exchange_id == self._exchange_id,
+                CurrencyPairSnapshot.kind == self._kind,
+                CurrencyPairSnapshot.symbol == self._symbol,
+                CurrencyPairSnapshot.align_to_minutes == self._align_to_minutes,
+            )
+            .order_by(CurrencyPairSnapshot.id.desc())
+            .limit(1)
+        )
+        result = await self._db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        pair = CurrencyPair(
+            base=record.base,
+            quote=record.quote,
+            ratio=record.ratio,
+            utc=record.utc,
+        )
+        value = json.dumps({
+            "base": record.base,
+            "quote": record.quote,
+            "ratio": record.ratio,
+            "utc": record.utc,
+        })
+        await self._redis.set(key, value, ex=int(self._cache_timeout))
+        return pair
 
     async def get_depth(self, limit: int = 100) -> BookDepth | None:
         raise NotImplementedError

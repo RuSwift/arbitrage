@@ -6,7 +6,11 @@ import sys
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from dotenv import load_dotenv
+
+# Enable async tests (required for TestAsync*OrchestratorImplRetriever)
+pytest_plugins = ("pytest_asyncio",)
 
 # Project root and .env
 _project_root = Path(__file__).resolve().parent.parent
@@ -41,7 +45,60 @@ def redis_client(redis_url):
     client.close()
 
 
+@pytest.fixture(scope="session")
+def async_database_url():
+    """Async PostgreSQL URL from .env (postgresql+asyncpg)."""
+    from app.settings import Settings
+    return Settings().database.async_url
+
+
+@pytest.fixture
+def db_session(database_url):
+    """Sync DB session for orchestrator tests. Rollback on teardown."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    engine = create_engine(database_url)
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session = factory()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
+@pytest_asyncio.fixture
+async def async_db_session(async_database_url):
+    """Async DB session for orchestrator tests. Rollback on teardown."""
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+    engine = create_async_engine(async_database_url)
+    factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autocommit=False,
+        autoflush=False,
+    )
+    async with factory() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
+
+
+@pytest_asyncio.fixture
+async def async_redis_client(redis_url):
+    """Async Redis client from .env."""
+    from redis.asyncio import from_url
+    client = from_url(redis_url)
+    await client.ping()
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
 THROTTLE_TEST_PREFIX = "arbitrage:throttle:test"
+ORCHESTRATOR_TEST_PREFIX = "arbitrage:orchestrator:price:test:"
 
 
 @pytest.fixture

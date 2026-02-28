@@ -114,10 +114,9 @@ class CurrencyPairSnapshot(Base):
     base = Column(String, nullable=False)
     quote = Column(String, nullable=False)
     ratio = Column(Float, nullable=False)
-    utc = Column(Float, nullable=True)
+    utc = Column(Float, nullable=True)  # реальное время события, Publisher обновляет из события
     align_to_minutes = Column(Integer, nullable=False)
-    # UTC, Unix timestamp
-    timestamp = Column(Float, nullable=False)
+    aligned_timestamp = Column(Float, nullable=False)  # выровненный utc для поиска/обновления
 
 
 class BookDepthSnapshot(Base):
@@ -135,11 +134,10 @@ class BookDepthSnapshot(Base):
     symbol = Column(String, nullable=False)
     exchange_symbol = Column(String, nullable=True)
     last_update_id = Column(Text, nullable=True)
-    utc = Column(Float, nullable=True)
+    utc = Column(Float, nullable=True)  # реальное время события (Publisher обновляет из события)
     bids_asks = Column(JSONB, nullable=False)  # list of {price, quantity} for bids and asks
     align_to_minutes = Column(Integer, nullable=False)
-    # UTC, Unix timestamp
-    timestamp = Column(Float, nullable=False)
+    aligned_timestamp = Column(Float, nullable=False)  # выровненный utc для поиска/обновления
 
 
 class CandleStickSnapshot(Base):
@@ -163,6 +161,6 @@ class CandleStickSnapshot(Base):
     close_price = Column(Float, nullable=False)
     coin_volume = Column(Float, nullable=False)
     usd_volume = Column(Float, nullable=True)
+    utc = Column(Float, nullable=True)  # реальное время события (Publisher обновляет из события)
     align_to_minutes = Column(Integer, nullable=False)
-    # UTC, Unix timestamp
-    timestamp = Column(Float, nullable=False)
+    aligned_timestamp = Column(Float, nullable=False)  # выровненный utc для поиска/обновления
