@@ -4,6 +4,7 @@ import time
 from typing import TYPE_CHECKING, Protocol
 
 from app.cex.dto import (
+    BidAsk,
     BookDepth,
     CandleStick,
     CurrencyPair,
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 from sqlalchemy import select
 
-from app.db.models import CurrencyPairSnapshot
+from app.db.models import BookDepthSnapshot, CurrencyPairSnapshot
 from enum import Enum
 
 class PublishStrategy(Enum):
@@ -227,6 +228,38 @@ def _parse_price_from_redis(raw: bytes | str | None) -> CurrencyPair | None:
         return None
 
 
+def _book_depth_redis_key(exchange_id: str, kind: str, symbol: str) -> str:
+    return f"arbitrage:orchestrator:depth:{exchange_id}:{kind}:{symbol}"
+
+
+def _parse_depth_from_redis(raw: bytes | str | None) -> BookDepth | None:
+    """Парсит значение из Redis (JSON) в BookDepth. Возвращает None если raw пусто или невалидно."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        data = json.loads(raw)
+        bids = [
+            BidAsk(price=float(x["price"]), quantity=float(x["quantity"]))
+            for x in (data.get("bids") or [])
+        ]
+        asks = [
+            BidAsk(price=float(x["price"]), quantity=float(x["quantity"]))
+            for x in (data.get("asks") or [])
+        ]
+        return BookDepth(
+            symbol=data["symbol"],
+            bids=bids,
+            asks=asks,
+            exchange_symbol=data.get("exchange_symbol"),
+            last_update_id=data.get("last_update_id"),
+            utc=data.get("utc"),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class SpotOrchestratorImpl:
     """
     Реализация оркестратора для spot: SpotPublisher + SpotRetriever.
@@ -250,6 +283,7 @@ class SpotOrchestratorImpl:
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
         self._db_last_save_stamp: float | None = None
+        self._db_last_depth_save_stamp: float | None = None
 
     # SpotRetriever
     def get_price(self) -> CurrencyPair | None:
@@ -287,7 +321,36 @@ class SpotOrchestratorImpl:
         return pair
 
     def get_depth(self, limit: int = 100) -> BookDepth | None:
-        raise NotImplementedError
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        depth = _parse_depth_from_redis(raw)
+        if depth is not None:
+            return depth
+        record = (
+            self._db_session.query(BookDepthSnapshot)
+            .filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+            )
+            .order_by(BookDepthSnapshot.id.desc())
+            .first()
+        )
+        if record is None:
+            return None
+        bids_asks = record.bids_asks or {"bids": [], "asks": []}
+        depth = BookDepth(
+            symbol=record.symbol,
+            bids=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("bids") or [])],
+            asks=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("asks") or [])],
+            exchange_symbol=record.exchange_symbol,
+            last_update_id=record.last_update_id,
+            utc=record.utc,
+        )
+        value = json.dumps(depth.as_dict())
+        self._redis.setex(key, int(self._cache_timeout), value)
+        return depth
 
     def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
         raise NotImplementedError
@@ -341,7 +404,50 @@ class SpotOrchestratorImpl:
     def publish_book_depth(
         self, book_depth: BookDepth, strategy: PublishStrategy = PublishStrategy.REPLACE
     ) -> None:
-        raise NotImplementedError
+        if strategy == PublishStrategy.MERGE:
+            raise NotImplementedError
+        utc = book_depth.utc
+        if utc is None:
+            utc = time.time()
+        aligned_utc = _align_utc(utc, self._align_to_minutes)
+        if aligned_utc is None:
+            aligned_utc = _align_utc(time.time(), self._align_to_minutes) or time.time()
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        value = json.dumps(book_depth.as_dict())
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        if self._db_last_depth_save_stamp is None or now >= self._db_last_depth_save_stamp + self._cache_timeout:
+            bids_asks = {
+                "bids": [b.as_dict() for b in book_depth.bids],
+                "asks": [a.as_dict() for a in book_depth.asks],
+            }
+            record = self._db_session.query(BookDepthSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_utc,
+            ).first()
+            if record is None:
+                record = BookDepthSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    exchange_symbol=book_depth.exchange_symbol,
+                    last_update_id=str(book_depth.last_update_id) if book_depth.last_update_id is not None else None,
+                    utc=book_depth.utc,
+                    bids_asks=bids_asks,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_utc,
+                )
+                self._db_session.add(record)
+            else:
+                record.exchange_symbol = book_depth.exchange_symbol
+                record.last_update_id = str(book_depth.last_update_id) if book_depth.last_update_id is not None else None
+                record.utc = book_depth.utc
+                record.bids_asks = bids_asks
+            self._db_session.commit()
+            self._db_last_depth_save_stamp = now
 
     def publish_candlestick(
         self, candlestick: CandleStick | list[CandleStick], strategy: PublishStrategy = PublishStrategy.MERGE
@@ -414,7 +520,38 @@ class AsyncSpotOrchestratorImpl:
         return pair
 
     async def get_depth(self, limit: int = 100) -> BookDepth | None:
-        raise NotImplementedError
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        depth = _parse_depth_from_redis(raw)
+        if depth is not None:
+            return depth
+        stmt = (
+            select(BookDepthSnapshot)
+            .where(
+                BookDepthSnapshot.exchange_id == self._exchange_id,
+                BookDepthSnapshot.kind == self._kind,
+                BookDepthSnapshot.symbol == self._symbol,
+                BookDepthSnapshot.align_to_minutes == self._align_to_minutes,
+            )
+            .order_by(BookDepthSnapshot.id.desc())
+            .limit(1)
+        )
+        result = await self._db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        bids_asks = record.bids_asks or {"bids": [], "asks": []}
+        depth = BookDepth(
+            symbol=record.symbol,
+            bids=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("bids") or [])],
+            asks=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("asks") or [])],
+            exchange_symbol=record.exchange_symbol,
+            last_update_id=record.last_update_id,
+            utc=record.utc,
+        )
+        value = json.dumps(depth.as_dict())
+        await self._redis.set(key, value, ex=int(self._cache_timeout))
+        return depth
 
     async def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
         raise NotImplementedError
@@ -446,6 +583,7 @@ class PerpetualOrchestratorImpl:
         self._cache_timeout = cache_timeout
         self._align_to_minutes = align_to_minutes
         self._db_last_save_stamp: float | None = None
+        self._db_last_depth_save_stamp: float | None = None
 
     # PerpetualRetriever
     def get_price(self) -> CurrencyPair | None:
@@ -483,7 +621,36 @@ class PerpetualOrchestratorImpl:
         return pair
 
     def get_depth(self, limit: int = 100) -> BookDepth | None:
-        raise NotImplementedError
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        depth = _parse_depth_from_redis(raw)
+        if depth is not None:
+            return depth
+        record = (
+            self._db_session.query(BookDepthSnapshot)
+            .filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+            )
+            .order_by(BookDepthSnapshot.id.desc())
+            .first()
+        )
+        if record is None:
+            return None
+        bids_asks = record.bids_asks or {"bids": [], "asks": []}
+        depth = BookDepth(
+            symbol=record.symbol,
+            bids=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("bids") or [])],
+            asks=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("asks") or [])],
+            exchange_symbol=record.exchange_symbol,
+            last_update_id=record.last_update_id,
+            utc=record.utc,
+        )
+        value = json.dumps(depth.as_dict())
+        self._redis.setex(key, int(self._cache_timeout), value)
+        return depth
 
     def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
         raise NotImplementedError
@@ -542,7 +709,50 @@ class PerpetualOrchestratorImpl:
     def publish_book_depth(
         self, book_depth: BookDepth, strategy: PublishStrategy = PublishStrategy.REPLACE
     ) -> None:
-        raise NotImplementedError
+        if strategy == PublishStrategy.MERGE:
+            raise NotImplementedError
+        utc = book_depth.utc
+        if utc is None:
+            utc = time.time()
+        aligned_utc = _align_utc(utc, self._align_to_minutes)
+        if aligned_utc is None:
+            aligned_utc = _align_utc(time.time(), self._align_to_minutes) or time.time()
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        value = json.dumps(book_depth.as_dict())
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        if self._db_last_depth_save_stamp is None or now >= self._db_last_depth_save_stamp + self._cache_timeout:
+            bids_asks = {
+                "bids": [b.as_dict() for b in book_depth.bids],
+                "asks": [a.as_dict() for a in book_depth.asks],
+            }
+            record = self._db_session.query(BookDepthSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_utc,
+            ).first()
+            if record is None:
+                record = BookDepthSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    exchange_symbol=book_depth.exchange_symbol,
+                    last_update_id=str(book_depth.last_update_id) if book_depth.last_update_id is not None else None,
+                    utc=book_depth.utc,
+                    bids_asks=bids_asks,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_utc,
+                )
+                self._db_session.add(record)
+            else:
+                record.exchange_symbol = book_depth.exchange_symbol
+                record.last_update_id = str(book_depth.last_update_id) if book_depth.last_update_id is not None else None
+                record.utc = book_depth.utc
+                record.bids_asks = bids_asks
+            self._db_session.commit()
+            self._db_last_depth_save_stamp = now
 
     def publish_candlestick(
         self, candlestick: CandleStick | list[CandleStick], strategy: PublishStrategy = PublishStrategy.MERGE
@@ -618,7 +828,38 @@ class AsyncPerpetualOrchestratorImpl:
         return pair
 
     async def get_depth(self, limit: int = 100) -> BookDepth | None:
-        raise NotImplementedError
+        key = _book_depth_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        depth = _parse_depth_from_redis(raw)
+        if depth is not None:
+            return depth
+        stmt = (
+            select(BookDepthSnapshot)
+            .where(
+                BookDepthSnapshot.exchange_id == self._exchange_id,
+                BookDepthSnapshot.kind == self._kind,
+                BookDepthSnapshot.symbol == self._symbol,
+                BookDepthSnapshot.align_to_minutes == self._align_to_minutes,
+            )
+            .order_by(BookDepthSnapshot.id.desc())
+            .limit(1)
+        )
+        result = await self._db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        bids_asks = record.bids_asks or {"bids": [], "asks": []}
+        depth = BookDepth(
+            symbol=record.symbol,
+            bids=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("bids") or [])],
+            asks=[BidAsk(price=p["price"], quantity=p["quantity"]) for p in (bids_asks.get("asks") or [])],
+            exchange_symbol=record.exchange_symbol,
+            last_update_id=record.last_update_id,
+            utc=record.utc,
+        )
+        value = json.dumps(depth.as_dict())
+        await self._redis.set(key, value, ex=int(self._cache_timeout))
+        return depth
 
     async def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
         raise NotImplementedError
