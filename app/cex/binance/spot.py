@@ -274,10 +274,12 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         if "stream" in msg:
             stream = msg.get("stream", "")
             data = msg.get("data", msg)
+            # depth-стрим не присылает "s" в data — берём символ из имени стрима (btcusdt@depth20@100ms)
+            sym_key = (data.get("s") or stream.split("@")[0] if stream else "").upper()
         else:
             data = msg
             stream = data.get("e", "")
-        sym_key = data.get("s", "").upper()
+            sym_key = data.get("s", "").upper()
         ticker = self._cached_tickers_dict.get(sym_key) or self._cached_tickers_dict.get(
             data.get("s", "")
         )
@@ -301,8 +303,10 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         elif "depth" in stream or data.get("e") == "depthUpdate":
             if not self._throttler.may_pass(sym, tag="depth"):
                 return
-            bids = [BidAsk(price=float(p), quantity=float(q)) for p, q in data.get("b", [])]
-            asks = [BidAsk(price=float(p), quantity=float(q)) for p, q in data.get("a", [])]
+            raw_bids = data.get("bids", data.get("b", []))
+            raw_asks = data.get("asks", data.get("a", []))
+            bids = [BidAsk(price=float(p), quantity=float(q)) for p, q in raw_bids]
+            asks = [BidAsk(price=float(p), quantity=float(q)) for p, q in raw_asks]
             if not bids and not asks:
                 return
             self._cb.handle(
@@ -311,7 +315,7 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                     exchange_symbol=ticker.exchange_symbol or sym_key,
                     bids=bids,
                     asks=asks,
-                    last_update_id=data.get("u"),
-                    utc=float(data["E"]) / 1000 if data.get("E") else None,
+                    last_update_id=data.get("u", data.get("lastUpdateId")),
+                    utc=float(data.get("E", 0)) / 1000 if data.get("E") else None,
                 )
             )

@@ -113,9 +113,10 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             raise RuntimeError("HTX linear WebSocket connection failed.")
         time.sleep(self.WS_CONNECT_BACKOFF_SEC)
         for contract in syms:
+            # step1 = finer aggregation; depth ~20 levels (HTX linear swap)
             self._ws.send(
                 json.dumps(
-                    {"sub": f"market.{contract}.depth.step6", "id": f"depth_{contract}"}
+                    {"sub": f"market.{contract}.depth.step1", "id": f"depth_{contract}"}
                 )
             )
 

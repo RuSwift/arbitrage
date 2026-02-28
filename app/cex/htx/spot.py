@@ -118,10 +118,11 @@ class HtxSpotConnector(BaseCEXSpotConnector):
                 json.dumps({"sub": f"market.{ex_sym.lower()}.bbo", "id": f"bbo_{ex_sym}"})
             )
             if depth:
+                # step1 = finer aggregation (precision*10); supports up to 20 levels (HTX/Huobi)
                 self._ws.send(
                     json.dumps(
                         {
-                            "sub": f"market.{ex_sym.lower()}.depth.step0",
+                            "sub": f"market.{ex_sym.lower()}.depth.step1",
                             "id": f"depth_{ex_sym}",
                         }
                     )

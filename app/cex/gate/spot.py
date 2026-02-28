@@ -122,7 +122,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         for cp in syms:
             self._ws_send("spot.book_ticker", "subscribe", [cp])
             if depth:
-                self._ws_send("spot.order_book_update", "subscribe", [cp, "100ms"])
+                self._ws_send("spot.obu", "subscribe", [f"ob.{cp}.50"])
 
     def _ws_send(self, channel: str, event: str, payload: list[str]) -> None:
         if not self._ws or not self._ws.sock or not self._ws.sock.connected:
@@ -371,14 +371,19 @@ class GateSpotConnector(BaseCEXSpotConnector):
                         utc=float(result.get("t", 0)) / 1000,
                     )
                 )
-            elif channel == "spot.order_book_update":
+            elif channel in ("spot.order_book_update", "spot.obu"):
+                # spot.obu (Order book V2): result.s = "ob.BTC_USDT.50", result.b / result.a = [[price, amount], ...]
                 s = result.get("s", "")
                 if not s:
                     continue
-                s_key = s.upper() if isinstance(s, str) else s
-                sym = _gate_to_symbol(s)
+                if s.startswith("ob.") and ".50" in s:
+                    cp = s[3 : s.index(".50")]
+                else:
+                    cp = s
+                s_key = cp.upper() if isinstance(cp, str) else cp
+                sym = _gate_to_symbol(cp)
                 ticker = (
-                    self._cached_tickers_dict.get(s)
+                    self._cached_tickers_dict.get(cp)
                     or self._cached_tickers_dict.get(s_key)
                     or self._cached_tickers_dict.get(sym)
                 )
@@ -405,7 +410,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
                 self._cb.handle(
                     depth=BookDepth(
                         symbol=ticker.symbol,
-                        exchange_symbol=ticker.exchange_symbol or s,
+                        exchange_symbol=ticker.exchange_symbol or cp,
                         bids=bid_list,
                         asks=ask_list,
                         last_update_id=result.get("u"),
