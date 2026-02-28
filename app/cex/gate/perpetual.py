@@ -128,7 +128,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             if depth:
                 self._ws_send("futures.order_book_update", "subscribe", [contract, "100ms", "100"])
             if klines:
-                self._ws_send("futures.candlesticks", "subscribe", [contract, "1m"])
+                self._ws_send("futures.candlesticks", "subscribe", ["1m", contract])
 
     def _ws_send(self, channel: str, event: str, payload: list[str]) -> None:
         if not self._ws or not self._ws.sock or not self._ws.sock.connected:
@@ -482,9 +482,11 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                 if final_bids and final_asks:
                     del self._depth_cache[ticker.symbol]
         elif channel == "futures.candlesticks":
-            s = result.get("s", result.get("n", ""))
-            if not s:
+            n = result.get("n", result.get("s", ""))
+            if not n:
                 return
+            # n is "1m_BABA_USDT" (interval_contract); strip interval to get contract
+            s = "_".join(n.split("_")[1:]) if "_" in n else n
             sym = _gate_to_symbol(s)
             ticker = self._cached_perps_dict.get(s) or self._cached_perps_dict.get(sym)
             if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):

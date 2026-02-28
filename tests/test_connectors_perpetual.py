@@ -160,7 +160,7 @@ class TestPerpetualConnector:
             assert pt.rate != 0.0, "funding rate point rate must not be zero"
 
     @pytest.mark.slow
-    @pytest.mark.timeout(45)
+    @pytest.mark.timeout(90)
     @pytest.mark.filterwarnings(
         "ignore::pytest.PytestUnhandledThreadExceptionWarning"
     )
@@ -169,7 +169,8 @@ class TestPerpetualConnector:
     ) -> None:
         cb = TestableCallback()
         connector.start(cb, symbols=[valid_pair_code, "BTC/INVALID"])
-        wait_sec = 20 if connector.exchange_id() == "gate" else 5
+        # Gate 1m klines can arrive at minute boundary; need ~70s to ensure at least one
+        wait_sec = 70 if connector.exchange_id() == "gate" else 5
         sleep(wait_sec)
         connector.stop()
         sleep(1)
