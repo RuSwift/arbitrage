@@ -4,6 +4,21 @@ from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
-from app.db.models import CrawlerIteration, CrawlerJob, Token  # noqa: E402
+from app.db.models import (  # noqa: E402
+    BookDepthSnapshot,
+    CandleStickSnapshot,
+    CrawlerIteration,
+    CrawlerJob,
+    CurrencyPairSnapshot,
+    Token,
+)
 
-__all__ = ["Base", "Token", "CrawlerJob", "CrawlerIteration"]
+__all__ = [
+    "Base",
+    "Token",
+    "CrawlerJob",
+    "CrawlerIteration",
+    "CurrencyPairSnapshot",
+    "BookDepthSnapshot",
+    "CandleStickSnapshot",
+]

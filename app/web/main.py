@@ -51,12 +51,12 @@ def create_app():
     ]
 
     @app.get("/login", response_class=HTMLResponse)
-    def login_page(request: Request):
+    async def login_page(request: Request):
         return templates.TemplateResponse("login.html", {"request": request})
 
     @app.get("/admin", response_class=HTMLResponse)
-    def admin_page(request: Request):
-        user = get_current_admin_from_request(request)
+    async def admin_page(request: Request):
+        user = await get_current_admin_from_request(request)
         if not user:
             return RedirectResponse(url="/login", status_code=302)
         return templates.TemplateResponse(

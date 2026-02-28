@@ -6,12 +6,14 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -29,7 +31,8 @@ class Token(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     symbol = Column(String, nullable=False)
     source = Column(String, nullable=False)  # "coinmarketcap" | "manual"
-    created_at = Column(DateTime(timezone=True), nullable=True)
+    # UTC
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -89,3 +92,77 @@ class CrawlerIteration(Base):
     funding_rate_history = Column(JSONB, nullable=True)  # list[FundingRatePoint] (perpetual)
 
     crawler_job = relationship("CrawlerJob", back_populates="iterations")
+
+
+# ---------------------------------------------------------------------------
+# CEX snapshots (exchange_id + kind on all)
+# ---------------------------------------------------------------------------
+
+
+class CurrencyPairSnapshot(Base):
+    """Цена пары (spot или perpetual)."""
+
+    __tablename__ = "currency_pair_snapshot"
+    __table_args__ = (
+        Index("ix_currency_pair_snapshot_exchange_kind", "exchange_id", "kind"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    exchange_id = Column(String, nullable=False)  # binance | bybit | okx | ...
+    kind = Column(String, nullable=False)  # spot | perpetual
+    symbol = Column(String, nullable=False)  # e.g. BTC/USDT
+    base = Column(String, nullable=False)
+    quote = Column(String, nullable=False)
+    ratio = Column(Float, nullable=False)
+    utc = Column(Float, nullable=True)
+    align_to_minutes = Column(Integer, nullable=False)
+    # UTC, Unix timestamp
+    timestamp = Column(Float, nullable=False)
+
+
+class BookDepthSnapshot(Base):
+    """Снимок стакана (bids/asks в JSONB)."""
+
+    __tablename__ = "book_depth_snapshot"
+    __table_args__ = (
+        Index("ix_book_depth_snapshot_exchange_kind", "exchange_id", "kind"),
+        Index("ix_book_depth_snapshot_symbol", "exchange_id", "kind", "symbol"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    exchange_id = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # spot | perpetual
+    symbol = Column(String, nullable=False)
+    exchange_symbol = Column(String, nullable=True)
+    last_update_id = Column(Text, nullable=True)
+    utc = Column(Float, nullable=True)
+    bids_asks = Column(JSONB, nullable=False)  # list of {price, quantity} for bids and asks
+    align_to_minutes = Column(Integer, nullable=False)
+    # UTC, Unix timestamp
+    timestamp = Column(Float, nullable=False)
+
+
+class CandleStickSnapshot(Base):
+    """Свеча (OHLCV)."""
+
+    __tablename__ = "candle_stick_snapshot"
+    __table_args__ = (
+        Index("ix_candle_stick_snapshot_exchange_kind", "exchange_id", "kind"),
+        Index("ix_candle_stick_snapshot_symbol", "exchange_id", "kind", "symbol"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    exchange_id = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # spot | perpetual
+    symbol = Column(String, nullable=False)
+    span_in_minutes = Column(Integer, nullable=False, server_default=text("1"))
+    utc_open_time = Column(Float, nullable=False)
+    open_price = Column(Float, nullable=False)
+    high_price = Column(Float, nullable=False)
+    low_price = Column(Float, nullable=False)
+    close_price = Column(Float, nullable=False)
+    coin_volume = Column(Float, nullable=False)
+    usd_volume = Column(Float, nullable=True)
+    align_to_minutes = Column(Integer, nullable=False)
+    # UTC, Unix timestamp
+    timestamp = Column(Float, nullable=False)

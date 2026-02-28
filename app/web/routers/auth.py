@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from app.settings import Settings
-from app.web.dependencies import COOKIE_ACCESS_TOKEN, _get_token_from_request, security_bearer
+from app.web.dependencies import COOKIE_ACCESS_TOKEN, _get_token_from_request, get_async_redis, security_bearer
 from app.web.services.token_service import (
     ACCESS_TOKEN_EXPIRE_SECONDS,
     create_token,
     decode_token,
-    revoke_jti,
+    revoke_jti_async,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -33,7 +33,7 @@ class TokenResponse(BaseModel):
 
 
 @router.post("/login")
-def login(body: LoginRequest) -> JSONResponse:
+async def login(body: LoginRequest) -> JSONResponse:
     """Выдать JWT по логину и паролю (RootSettings). Устанавливает cookie access_token для браузера."""
     settings = Settings()
     if body.login != settings.root.login:
@@ -66,8 +66,9 @@ def login(body: LoginRequest) -> JSONResponse:
 
 
 @router.post("/logout")
-def logout(
+async def logout(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
+    redis=Depends(get_async_redis),
 ) -> dict[str, str]:
     """Отозвать текущий токен (revocation)."""
     if not credentials or not credentials.credentials:
@@ -85,20 +86,24 @@ def logout(
         )
     now_ts = int(datetime.now(timezone.utc).timestamp())
     ttl = max(0, exp - now_ts) if exp else ACCESS_TOKEN_EXPIRE_SECONDS
-    revoke_jti(jti, ttl)
+    await revoke_jti_async(redis, jti, ttl)
     return {"status": "ok", "message": "Logged out"}
 
 
 @router.post("/revoke", response_model=dict[str, str])
-def revoke(
+async def revoke(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_bearer),
+    redis=Depends(get_async_redis),
 ) -> dict[str, str]:
     """Отозвать текущий токен (то же, что logout)."""
-    return logout(credentials)
+    return await logout(credentials, redis)
 
 
 @router.get("/logout")
-def logout_get(request: Request):
+async def logout_get(
+    request: Request,
+    redis=Depends(get_async_redis),
+):
     """Выход для браузера: отзыв токена из cookie, удаление cookie, редирект на /login."""
     token = _get_token_from_request(request)
     if token:
@@ -109,7 +114,7 @@ def logout_get(request: Request):
             if jti:
                 now_ts = int(datetime.now(timezone.utc).timestamp())
                 ttl = max(0, exp - now_ts) if exp else ACCESS_TOKEN_EXPIRE_SECONDS
-                revoke_jti(jti, ttl)
+                await revoke_jti_async(redis, jti, ttl)
         except Exception:
             pass
     resp = RedirectResponse(url="/login", status_code=302)

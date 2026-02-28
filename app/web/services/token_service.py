@@ -73,3 +73,15 @@ def revoke_jti(jti: str, ttl_seconds: int) -> None:
     r = _get_redis()
     key = f"{REVOKED_KEY_PREFIX}{jti}"
     r.setex(key, min(ttl_seconds, ACCESS_TOKEN_EXPIRE_SECONDS), "1")
+
+
+async def is_revoked_async(redis: Any, jti: str) -> bool:
+    """Проверить, отозван ли токен по jti (async Redis client)."""
+    key = f"{REVOKED_KEY_PREFIX}{jti}"
+    return (await redis.get(key)) is not None
+
+
+async def revoke_jti_async(redis: Any, jti: str, ttl_seconds: int) -> None:
+    """Пометить токен как отозванный в Redis с TTL (async Redis client)."""
+    key = f"{REVOKED_KEY_PREFIX}{jti}"
+    await redis.setex(key, min(ttl_seconds, ACCESS_TOKEN_EXPIRE_SECONDS), "1")

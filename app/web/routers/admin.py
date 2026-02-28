@@ -6,11 +6,11 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CrawlerIteration, CrawlerJob
-from app.web.dependencies import get_current_admin, get_db
+from app.web.dependencies import get_async_db, get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
@@ -57,34 +57,41 @@ def _iteration_to_dict(it: CrawlerIteration) -> dict[str, Any]:
 
 
 @router.get("/crawler/jobs")
-def list_crawler_jobs(
-    db: Session = Depends(get_db),
+async def list_crawler_jobs(
+    db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     exchange: str | None = Query(None),
     connector: str | None = Query(None),
 ):
     """List CrawlerJob with optional filters and pagination."""
-    q = db.query(CrawlerJob)
+    base = select(CrawlerJob)
     if exchange:
-        q = q.filter(CrawlerJob.exchange == exchange)
+        base = base.where(CrawlerJob.exchange == exchange)
     if connector:
-        q = q.filter(CrawlerJob.connector == connector)
-    total = q.count()
-    q = q.order_by(CrawlerJob.start.desc())
-    jobs = q.offset((page - 1) * page_size).limit(page_size).all()
+        base = base.where(CrawlerJob.connector == connector)
 
-    # Count iterations per job in one go
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar() or 0
+
+    stmt = (
+        base.order_by(CrawlerJob.start.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(stmt)
+    jobs = result.scalars().all()
+
     job_ids = [j.id for j in jobs]
+    count_map: dict[int, int] = {}
     if job_ids:
-        counts_q = (
-            db.query(CrawlerIteration.crawler_job_id, func.count(CrawlerIteration.id))
-            .filter(CrawlerIteration.crawler_job_id.in_(job_ids))
+        counts_stmt = (
+            select(CrawlerIteration.crawler_job_id, func.count(CrawlerIteration.id))
+            .where(CrawlerIteration.crawler_job_id.in_(job_ids))
             .group_by(CrawlerIteration.crawler_job_id)
         )
-        count_map = dict(counts_q.all())
-    else:
-        count_map = {}
+        counts_result = await db.execute(counts_stmt)
+        count_map = dict(counts_result.all())
 
     return {
         "jobs": [_job_to_dict(j, iterations_count=count_map.get(j.id, 0)) for j in jobs],
@@ -95,32 +102,42 @@ def list_crawler_jobs(
 
 
 @router.get("/crawler/jobs/{job_id}")
-def get_crawler_job(
+async def get_crawler_job(
     job_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Get one CrawlerJob by id."""
-    job = db.query(CrawlerJob).filter(CrawlerJob.id == job_id).first()
+    result = await db.execute(select(CrawlerJob).where(CrawlerJob.id == job_id))
+    job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="CrawlerJob not found")
-    count = db.query(func.count(CrawlerIteration.id)).filter(CrawlerIteration.crawler_job_id == job_id).scalar()
+    count_result = await db.execute(
+        select(func.count(CrawlerIteration.id)).where(CrawlerIteration.crawler_job_id == job_id)
+    )
+    count = count_result.scalar() or 0
     return _job_to_dict(job, iterations_count=count)
 
 
 @router.get("/crawler/jobs/{job_id}/iterations")
-def list_job_iterations(
+async def list_job_iterations(
     job_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: str | None = Query(None),
 ):
     """List CrawlerIteration for a job with optional status filter."""
-    q = db.query(CrawlerIteration).filter(CrawlerIteration.crawler_job_id == job_id)
+    base = select(CrawlerIteration).where(CrawlerIteration.crawler_job_id == job_id)
     if status:
-        q = q.filter(CrawlerIteration.status == status)
-    total = q.count()
-    iterations = q.order_by(CrawlerIteration.id).offset((page - 1) * page_size).limit(page_size).all()
+        base = base.where(CrawlerIteration.status == status)
+
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar() or 0
+
+    stmt = base.order_by(CrawlerIteration.id).offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    iterations = result.scalars().all()
+
     return {
         "iterations": [_iteration_to_dict(it) for it in iterations],
         "total": total,
@@ -130,42 +147,47 @@ def list_job_iterations(
 
 
 @router.get("/crawler/iterations/{iteration_id}")
-def get_iteration(
+async def get_iteration(
     iteration_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Get one CrawlerIteration by id."""
-    it = db.query(CrawlerIteration).filter(CrawlerIteration.id == iteration_id).first()
+    result = await db.execute(select(CrawlerIteration).where(CrawlerIteration.id == iteration_id))
+    it = result.scalar_one_or_none()
     if not it:
         raise HTTPException(status_code=404, detail="CrawlerIteration not found")
     return _iteration_to_dict(it)
 
 
 @router.get("/crawler/stats")
-def crawler_stats(
-    db: Session = Depends(get_db),
+async def crawler_stats(
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Summary stats: total jobs, by exchange/connector, last job."""
-    total_jobs = db.query(func.count(CrawlerJob.id)).scalar() or 0
-    total_iterations = db.query(func.count(CrawlerIteration.id)).scalar() or 0
+    total_jobs_result = await db.execute(select(func.count(CrawlerJob.id)))
+    total_jobs = total_jobs_result.scalar() or 0
+    total_iterations_result = await db.execute(select(func.count(CrawlerIteration.id)))
+    total_iterations = total_iterations_result.scalar() or 0
 
-    by_exchange = (
-        db.query(CrawlerJob.exchange, func.count(CrawlerJob.id))
-        .group_by(CrawlerJob.exchange)
-        .all()
+    by_exchange_result = await db.execute(
+        select(CrawlerJob.exchange, func.count(CrawlerJob.id)).group_by(CrawlerJob.exchange)
     )
-    by_connector = (
-        db.query(CrawlerJob.connector, func.count(CrawlerJob.id))
-        .group_by(CrawlerJob.connector)
-        .all()
+    by_exchange = by_exchange_result.all()
+    by_connector_result = await db.execute(
+        select(CrawlerJob.connector, func.count(CrawlerJob.id)).group_by(CrawlerJob.connector)
     )
-    by_status = (
-        db.query(CrawlerIteration.status, func.count(CrawlerIteration.id))
-        .group_by(CrawlerIteration.status)
-        .all()
+    by_connector = by_connector_result.all()
+    by_status_result = await db.execute(
+        select(CrawlerIteration.status, func.count(CrawlerIteration.id)).group_by(
+            CrawlerIteration.status
+        )
     )
+    by_status = by_status_result.all()
 
-    last_job = db.query(CrawlerJob).order_by(CrawlerJob.start.desc()).first()
+    last_job_result = await db.execute(
+        select(CrawlerJob).order_by(CrawlerJob.start.desc()).limit(1)
+    )
+    last_job = last_job_result.scalar_one_or_none()
 
     return {
         "total_jobs": total_jobs,

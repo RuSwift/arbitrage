@@ -35,7 +35,14 @@ db_settings = Settings().database
 config.set_main_option("sqlalchemy.url", db_settings.url)
 
 # Для autogenerate: при добавлении моделей импортируйте их сюда
-from app.db.models import CrawlerIteration, CrawlerJob, Token  # noqa: F401
+from app.db.models import (  # noqa: F401
+    BookDepthSnapshot,
+    CandleStickSnapshot,
+    CrawlerIteration,
+    CrawlerJob,
+    CurrencyPairSnapshot,
+    Token,
+)
 
 target_metadata = Base.metadata
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from typing import Annotated, Any
 
 import jwt
@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.settings import Settings
@@ -17,11 +18,13 @@ from app.web.services.token_service import (
     ACCESS_TOKEN_EXPIRE_SECONDS,
     create_token,
     decode_token,
-    is_revoked,
+    is_revoked_async,
 )
 
 _engine: Any = None
 _SessionLocal: Any = None
+_async_engine: Any = None
+_AsyncSessionLocal: Any = None
 
 
 def _get_engine():
@@ -57,16 +60,64 @@ def get_db() -> Generator[Session, None, None]:
         session.close()
 
 
+def _get_async_engine():
+    global _async_engine
+    if _async_engine is None:
+        _async_engine = create_async_engine(
+            Settings().database.async_url,
+            echo=Settings().database.echo,
+            pool_size=Settings().database.pool_size,
+            max_overflow=Settings().database.max_overflow,
+        )
+    return _async_engine
+
+
+def _get_async_session_factory():
+    global _AsyncSessionLocal
+    if _AsyncSessionLocal is None:
+        _AsyncSessionLocal = async_sessionmaker(
+            bind=_get_async_engine(),
+            class_=AsyncSession,
+            autocommit=False,
+            autoflush=False,
+        )
+    return _AsyncSessionLocal
+
+
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an async DB session for FastAPI dependency injection."""
+    async_factory = _get_async_session_factory()
+    async with async_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
 _redis_client: Any = None
+_async_redis_client: Any = None
 
 
 def get_redis():
-    """Return a Redis client (lazy). Uses Settings().redis.url."""
+    """Return a sync Redis client (lazy). Uses Settings().redis.url."""
     global _redis_client
     if _redis_client is None:
         import redis
         _redis_client = redis.from_url(Settings().redis.url)
     return _redis_client
+
+
+def get_async_redis():
+    """Return an async Redis client (lazy). Uses Settings().redis.url."""
+    global _async_redis_client
+    if _async_redis_client is None:
+        from redis.asyncio import from_url
+        _async_redis_client = from_url(Settings().redis.url)
+    return _async_redis_client
 
 
 # --- Current User / Admin (JWT + BasicAuth) ---
@@ -84,8 +135,9 @@ class CurrentUser(BaseModel):
     jti: str | None = None
 
 
-def get_current_user(
+async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)],
+    redis: Annotated[Any, Depends(get_async_redis)],
 ) -> CurrentUser:
     """Зависимость: текущий пользователь из JWT (Bearer). Проверяет expiration и revocation."""
     if not credentials or not credentials.credentials:
@@ -102,7 +154,7 @@ def get_current_user(
     jti = payload.get("jti")
     if not jti:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    if is_revoked(jti):
+    if await is_revoked_async(redis, jti):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
     return CurrentUser(
         sub=payload["sub"],
@@ -122,11 +174,12 @@ def _validate_basic(credentials: HTTPBasicCredentials) -> CurrentUser | None:
     return CurrentUser(sub=credentials.username, role="root", exp=None, jti=None)
 
 
-def get_current_admin(
+async def get_current_admin(
     request: Request,
     response: Response,
     credentials_bearer: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)],
     credentials_basic: Annotated[HTTPBasicCredentials | None, Depends(security_basic)],
+    redis: Annotated[Any, Depends(get_async_redis)],
 ) -> CurrentUser:
     """
     Зависимость: текущий пользователь с ролью root (админ).
@@ -152,7 +205,7 @@ def get_current_admin(
         if payload.get("role") != "root":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
         jti = payload.get("jti")
-        if jti and is_revoked(jti):
+        if jti and await is_revoked_async(redis, jti):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
         return CurrentUser(
             sub=payload["sub"],
@@ -187,7 +240,7 @@ def _get_token_from_request(request: Request) -> str | None:
     return request.cookies.get(COOKIE_ACCESS_TOKEN)
 
 
-def get_current_admin_from_request(request: Request) -> CurrentUser | None:
+async def get_current_admin_from_request(request: Request) -> CurrentUser | None:
     """
     Для страниц (GET /admin): получить админа из cookie или Bearer.
     Возвращает CurrentUser с role=root или None (не авторизован / не админ).
@@ -202,8 +255,10 @@ def get_current_admin_from_request(request: Request) -> CurrentUser | None:
     if payload.get("role") != "root":
         return None
     jti = payload.get("jti")
-    if jti and is_revoked(jti):
-        return None
+    if jti:
+        redis = get_async_redis()
+        if await is_revoked_async(redis, jti):
+            return None
     return CurrentUser(
         sub=payload["sub"],
         role=payload["role"],
