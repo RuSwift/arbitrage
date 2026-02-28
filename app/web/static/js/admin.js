@@ -68,7 +68,8 @@
                 loadingIterationDetail: false,
                 selectedVolumeCandleIndex: null,
                 exchanges: [],
-                connectors: ['spot', 'perpetual']
+                connectors: ['spot', 'perpetual'],
+                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null }
             };
         },
         mounted: function () {
@@ -151,6 +152,30 @@
                         self.error = e.message || 'Ошибка загрузки итерации';
                     })
                     .finally(function () { self.loadingIterationDetail = false; });
+            },
+            showFundingDetail: function (it, type) {
+                var title = type === 'fr' ? 'Funding rate' : type === 'next' ? 'Next funding rate' : 'Funding rate history';
+                var data = type === 'fr' ? it.funding_rate : type === 'next' ? it.next_funding_rate : (it.funding_rate_history || null);
+                if (!data && type === 'hist') data = [];
+                this.fundingDetailModal = { show: true, title: title, token: it.token || '', type: type, data: data };
+            },
+            closeFundingDetailModal: function () {
+                this.fundingDetailModal = { show: false, title: '', token: '', type: '', data: null };
+            },
+            formatUtc: function (utc) {
+                if (utc == null) return '—';
+                var t = Number(utc);
+                if (t < 1e12) t *= 1000;
+                var d = new Date(t);
+                if (isNaN(d.getTime())) return '—';
+                return d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+            },
+            /** Decimal rate (e.g. 0.0001) -> multiply by 100 for % (0.01%). Used for funding_rate, next_funding_rate, funding_rate_history. */
+            formatRatioPct: function (ratio) {
+                if (ratio == null) return '—';
+                var n = Number(ratio);
+                if (isNaN(n)) return '—';
+                return (n * 100).toFixed(4) + '%';
             },
             closeJobPanel: function () {
                 this.selectedJob = null;
@@ -458,13 +483,16 @@
             '        <span class="text-muted small">Всего: [[ iterationsTotal ]] [[ tokenSearchQuery.trim() ? \'(показано \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
             '      </div>' +
             '      <div class="table-responsive"><table class="table table-sm">' +
-            '        <thead><tr><th>ID</th><th>Токен</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th></th></tr></thead>' +
+            '        <thead><tr><th>ID</th><th>Токен</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
             '        <tbody>' +
             '          <tr v-for="it in filteredJobIterations" :key="it.id">' +
             '            <td>[[ it.id ]]</td><td>[[ it.token ]]</td>' +
             '            <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
             '            <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
             '            <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
+            '            <td><a href="#" v-if="it.funding_rate" @click.prevent="showFundingDetail(it, \'fr\')" class="small" :title="formatRatioPct(it.funding_rate.rate)">[[ formatRatioPct(it.funding_rate.rate) ]]</a><span v-else>—</span></td>' +
+            '            <td><a href="#" v-if="it.next_funding_rate" @click.prevent="showFundingDetail(it, \'next\')" class="small">[[ it.next_funding_rate.next_funding_utc != null ? formatUtc(it.next_funding_rate.next_funding_utc) : (it.next_funding_rate.next_rate != null ? formatRatioPct(it.next_funding_rate.next_rate) : \'…\') ]]</a><span v-else>—</span></td>' +
+            '            <td><a href="#" v-if="it.funding_rate_history && it.funding_rate_history.length" @click.prevent="showFundingDetail(it, \'hist\')" class="small">[[ it.funding_rate_history.length ]]</a><span v-else>—</span></td>' +
             '            <td><button class="btn btn-sm btn-outline-primary" @click.stop="showIteration(it)">Детали</button></td>' +
             '          </tr>' +
             '        </tbody>' +
@@ -557,11 +585,48 @@
             '          </div>' +
             '        </div>' +
             '      </div>' +
-            '      <div v-if="selectedIteration.funding_rate" class="mt-2"><strong>funding_rate:</strong> <pre class="bg-light p-2 rounded d-inline-block small mb-0" style="max-height:60px; overflow:auto">[[ JSON.stringify(selectedIteration.funding_rate, null, 2) ]]</pre></div>' +
             '    </div>' +
             '  </template>' +
             '  <template slot="footer">' +
             '    <button class="btn btn-secondary btn-sm" @click="closeIterationModal">Закрыть</button>' +
+            '  </template>' +
+            '</modal-window>' +
+            '<!-- Funding detail modal (separate, compact) -->' +
+            '<modal-window v-if="fundingDetailModal.show" width="500px" height="auto">' +
+            '  <template slot="header">' +
+            '    <div class="d-flex justify-content-between align-items-center w-100">' +
+            '      <h6 class="mb-0">[[ fundingDetailModal.title ]] — [[ fundingDetailModal.token ]]</h6>' +
+            '      <button type="button" class="btn-close" @click="closeFundingDetailModal"></button>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="body">' +
+            '    <div v-if="fundingDetailModal.type === \'fr\' && fundingDetailModal.data" class="small">' +
+            '      <p class="mb-1"><strong>Rate:</strong> [[ formatRatioPct(fundingDetailModal.data.rate) ]]</p>' +
+            '      <p class="mb-1"><strong>Next funding (UTC):</strong> [[ formatUtc(fundingDetailModal.data.next_funding_utc) ]]</p>' +
+            '      <p class="mb-1" v-if="fundingDetailModal.data.next_rate != null"><strong>Next rate:</strong> [[ formatRatioPct(fundingDetailModal.data.next_rate) ]]</p>' +
+            '      <p class="mb-1" v-if="fundingDetailModal.data.index_price != null"><strong>Index price:</strong> [[ fundingDetailModal.data.index_price ]]</p>' +
+            '      <p class="mb-0" v-if="fundingDetailModal.data.utc != null"><strong>UTC:</strong> [[ formatUtc(fundingDetailModal.data.utc) ]]</p>' +
+            '    </div>' +
+            '    <div v-else-if="fundingDetailModal.type === \'next\' && fundingDetailModal.data" class="small">' +
+            '      <p class="mb-1"><strong>Next funding (UTC):</strong> [[ formatUtc(fundingDetailModal.data.next_funding_utc) ]]</p>' +
+            '      <p class="mb-0" v-if="fundingDetailModal.data.next_rate != null"><strong>Next rate:</strong> [[ formatRatioPct(fundingDetailModal.data.next_rate) ]]</p>' +
+            '    </div>' +
+            '    <div v-else-if="fundingDetailModal.type === \'hist\' && fundingDetailModal.data && fundingDetailModal.data.length" class="small">' +
+            '      <div class="table-responsive" style="max-height:280px; overflow:auto">' +
+            '        <table class="table table-sm">' +
+            '          <thead><tr><th>Время (UTC)</th><th>Rate %</th></tr></thead>' +
+            '          <tbody>' +
+            '            <tr v-for="(row, i) in fundingDetailModal.data" :key="i">' +
+            '              <td>[[ formatUtc(row.funding_time_utc) ]]</td><td>[[ formatRatioPct(row.rate) ]]</td>' +
+            '            </tr>' +
+            '          </tbody>' +
+            '        </table>' +
+            '      </div>' +
+            '    </div>' +
+            '    <div v-else class="text-muted small">Нет данных</div>' +
+            '  </template>' +
+            '  <template slot="footer">' +
+            '    <button class="btn btn-secondary btn-sm" @click="closeFundingDetailModal">Закрыть</button>' +
             '  </template>' +
             '</modal-window>' +
             '</div>'

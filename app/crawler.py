@@ -190,6 +190,10 @@ def _run(
                 fr = conn.get_funding_rate(pair_code)
                 if fr:
                     it.funding_rate = fr.as_dict()
+                    it.next_funding_rate = {
+                        "next_funding_utc": fr.next_funding_utc,
+                        "next_rate": fr.next_rate,
+                    }
                 hist = conn.get_funding_rate_history(pair_code)
                 if hist:
                     it.funding_rate_history = [h.as_dict() for h in hist]

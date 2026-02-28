@@ -235,7 +235,11 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         rec = lst[0]
         funding_rate = rec.get("fundingRate")
         next_ts = rec.get("nextFundingTime")
-        if funding_rate is None:
+        if funding_rate is None or (isinstance(funding_rate, str) and not funding_rate.strip()):
+            return None
+        try:
+            rate_val = float(funding_rate)
+        except (TypeError, ValueError):
             return None
         ticker = self._cached_perps_dict.get(ex_sym) or self._cached_perps_dict.get(
             symbol.replace("/", "")
@@ -248,7 +252,7 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
             index_price = None
         return FundingRate(
             symbol=sym,
-            rate=float(funding_rate),
+            rate=rate_val,
             next_funding_utc=next_utc,
             index_price=index_price,
             utc=_utc_now_float(),
@@ -273,13 +277,22 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         items = r.get("result", {}).get("list", [])
         if not isinstance(items, list):
             return None
-        return [
-            FundingRatePoint(
-                funding_time_utc=float(x["fundingRateTimestamp"]) / 1000,
-                rate=float(x["fundingRate"]),
-            )
-            for x in items
-        ]
+        result: list[FundingRatePoint] = []
+        for x in items:
+            try:
+                ts = x.get("fundingRateTimestamp")
+                fr = x.get("fundingRate")
+                if ts is None or fr is None or (isinstance(fr, str) and not fr.strip()):
+                    continue
+                result.append(
+                    FundingRatePoint(
+                        funding_time_utc=float(ts) / 1000,
+                        rate=float(fr),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return result if result else None
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_perps_dict:
