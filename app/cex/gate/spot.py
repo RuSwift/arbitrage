@@ -338,6 +338,9 @@ class GateSpotConnector(BaseCEXSpotConnector):
         result = msg.get("result")
         if not result:
             return
+        # API may send result as list of one item (e.g. candlesticks)
+        if isinstance(result, list) and len(result) > 0:
+            result = result[0]
         # Gate may send result as a single dict or as a list of dicts (or mixed)
         if isinstance(result, dict):
             payloads = [result]

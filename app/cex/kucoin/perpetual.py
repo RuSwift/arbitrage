@@ -446,6 +446,8 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             msg = json.loads(raw)
         except Exception:
             return
+        if not isinstance(msg, dict):
+            return
         if msg.get("type") == "welcome":
             self._send_pending_subscribes()
             return

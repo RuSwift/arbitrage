@@ -299,6 +299,8 @@ class OkxSpotConnector(BaseCEXSpotConnector):
             msg = json.loads(raw)
         except Exception:
             return
+        if not isinstance(msg, dict):
+            return
         if "event" in msg and msg.get("event") != "update":
             return
         if "data" not in msg:

@@ -404,6 +404,11 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         result = msg.get("result")
         if not result:
             return
+        # API may send result as list of one item (e.g. candlesticks)
+        if isinstance(result, list) and len(result) > 0:
+            result = result[0]
+        if not isinstance(result, dict):
+            return
         if channel == "futures.book_ticker":
             s = result.get("s", "")
             sym = _gate_to_symbol(s)

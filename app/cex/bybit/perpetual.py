@@ -313,6 +313,11 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         if not data:
             return
         if topic.startswith("kline."):
+            # API sends data as array of one kline object
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                data = data[0]
+            elif not isinstance(data, dict):
+                return
             parts = topic.split(".")
             ex_sym = parts[-1] if len(parts) >= 3 else data.get("symbol", "")
             ticker = self._cached_perps_dict.get(ex_sym) if ex_sym else None
