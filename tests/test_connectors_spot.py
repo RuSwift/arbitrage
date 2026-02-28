@@ -121,10 +121,8 @@ class TestSpotConnector:
         connector.stop()
         sleep(1)
         assert len(cb.books) > 0 or len(cb.depths) > 0, "expected at least one book or depth event"
-        # В CI нестабильно приходят оба типа для Kucoin, HTX — требуем только хотя бы один
-        if connector.exchange_id() not in ("kucoin", "htx"):
-            assert len(cb.books) > 0, "expected at least one book_ticker event"
-            assert len(cb.depths) > 0, "expected at least one depth event"
+        assert len(cb.books) > 0, "expected at least one book_ticker event"
+        assert len(cb.depths) > 0, "expected at least one depth event"
         if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
         if cb.books:

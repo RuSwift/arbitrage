@@ -133,7 +133,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
                         {
                             "id": f"depth-{int(time.time() * 1000)}-{i}",
                             "type": "subscribe",
-                            "topic": f"/contractMarket/level2Depth20:{ex_sym}",
+                            "topic": f"/contractMarket/level2Depth50:{ex_sym}",
                             "response": True,
                         }
                     )

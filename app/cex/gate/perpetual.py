@@ -458,9 +458,9 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                 cache["asks"] = ask_list
                 cache["u"] = u
                 cache["t"] = t
-            final_bids = cache["bids"]
-            final_asks = cache["asks"]
-            if final_bids and final_asks:
+            final_bids = cache["bids"] or []
+            final_asks = cache["asks"] or []
+            if final_bids or final_asks:
                 self._cb.handle(
                     depth=BookDepth(
                         symbol=ticker.symbol,
@@ -471,4 +471,5 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                         utc=cache["t"],
                     )
                 )
-                del self._depth_cache[ticker.symbol]
+                if final_bids and final_asks:
+                    del self._depth_cache[ticker.symbol]

@@ -122,7 +122,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
                         {
                             "id": f"depth-{int(time.time() * 1000)}-{i}",
                             "type": "subscribe",
-                            "topic": f"/market/level2Depth20:{ex_sym}",
+                            "topic": f"/spotMarket/level2Depth50:{ex_sym}",
                             "response": True,
                         }
                     )
