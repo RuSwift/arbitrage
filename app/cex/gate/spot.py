@@ -324,6 +324,8 @@ class GateSpotConnector(BaseCEXSpotConnector):
             msg = json.loads(raw)
         except Exception:
             return
+        if not isinstance(msg, dict):
+            return
         if msg.get("event") == "pong" or "error" in msg:
             return
         channel = msg.get("channel", "")
@@ -333,46 +335,54 @@ class GateSpotConnector(BaseCEXSpotConnector):
         result = msg.get("result")
         if not result:
             return
-        if channel == "spot.book_ticker":
-            s = result.get("s", "")
-            sym = _gate_to_symbol(s)
-            ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
-            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="book"):
-                return
-            b, B = result.get("b", "0"), result.get("B", "0")
-            a, A = result.get("a", "0"), result.get("A", "0")
-            self._cb.handle(
-                book=BookTicker(
-                    symbol=ticker.symbol,
-                    bid_price=float(b) if b else 0.0,
-                    bid_qty=float(B) if B else 0.0,
-                    ask_price=float(a) if a else 0.0,
-                    ask_qty=float(A) if A else 0.0,
-                    last_update_id=result.get("u"),
-                    utc=float(result.get("t", 0)) / 1000,
+        # Gate may send result as a single dict or as a list of dicts
+        if isinstance(result, dict):
+            payloads = [result]
+        elif isinstance(result, list):
+            payloads = [r for r in result if isinstance(r, dict)]
+        else:
+            return
+        for result in payloads:
+            if channel == "spot.book_ticker":
+                s = result.get("s", "")
+                sym = _gate_to_symbol(s)
+                ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
+                if not ticker or not self._throttler.may_pass(ticker.symbol, tag="book"):
+                    continue
+                b, B = result.get("b", "0"), result.get("B", "0")
+                a, A = result.get("a", "0"), result.get("A", "0")
+                self._cb.handle(
+                    book=BookTicker(
+                        symbol=ticker.symbol,
+                        bid_price=float(b) if b else 0.0,
+                        bid_qty=float(B) if B else 0.0,
+                        ask_price=float(a) if a else 0.0,
+                        ask_qty=float(A) if A else 0.0,
+                        last_update_id=result.get("u"),
+                        utc=float(result.get("t", 0)) / 1000,
+                    )
                 )
-            )
-        elif channel == "spot.order_book_update":
-            s = result.get("s", "")
-            sym = _gate_to_symbol(s)
-            ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
-            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="depth"):
-                return
-            bids = result.get("b", [])
-            asks = result.get("a", [])
-            if bids and isinstance(bids[0], (list, tuple)):
-                bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
-                ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
-            else:
-                bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
-                ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
-            self._cb.handle(
-                depth=BookDepth(
-                    symbol=ticker.symbol,
-                    exchange_symbol=ticker.exchange_symbol or s,
-                    bids=bid_list,
-                    asks=ask_list,
-                    last_update_id=result.get("u"),
-                    utc=float(result.get("t", 0)) / 1000,
+            elif channel == "spot.order_book_update":
+                s = result.get("s", "")
+                sym = _gate_to_symbol(s)
+                ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
+                if not ticker or not self._throttler.may_pass(ticker.symbol, tag="depth"):
+                    continue
+                bids = result.get("b", [])
+                asks = result.get("a", [])
+                if bids and isinstance(bids[0], (list, tuple)):
+                    bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
+                    ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
+                else:
+                    bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
+                    ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
+                self._cb.handle(
+                    depth=BookDepth(
+                        symbol=ticker.symbol,
+                        exchange_symbol=ticker.exchange_symbol or s,
+                        bids=bid_list,
+                        asks=ask_list,
+                        last_update_id=result.get("u"),
+                        utc=float(result.get("t", 0)) / 1000,
+                    )
                 )
-            )
