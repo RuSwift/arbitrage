@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 
+import requests
+
 from app.cex.dto import (
     BookDepth,
     BookTicker,
@@ -16,6 +18,7 @@ from app.cex.dto import (
     Ticker,
     WithdrawInfo,
 )
+from app.cex.rest_rate_limit import get_tracker, request_with_retry
 from app.cex.throttler import Throttler
 from app.settings import Settings
 
@@ -54,6 +57,23 @@ class _BaseCEXConnectorMixin:
         )
         self.log = log if log is not None else logging.getLogger(self.__class__.__module__)
 
+    def _request_limited(
+        self,
+        url: str,
+        params: dict[str, str],
+        timeout: int,
+    ) -> requests.Response:
+        """Perform GET through rate-limited layer (weight + 429 retry)."""
+        tracker = get_tracker()
+        return request_with_retry(
+            tracker=tracker,
+            exchange_id=self.exchange_id(),
+            kind=self._connector_kind(),
+            url=url,
+            params=params,
+            timeout=timeout,
+        )
+
 
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
     """Base connector for spot market: tickers, prices, orderbook, klines."""
@@ -62,6 +82,9 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
     @abstractmethod
     def exchange_id(cls) -> str:
         ...
+
+    def _connector_kind(self) -> str:
+        return "spot"
 
     @abstractmethod
     def start(
@@ -107,6 +130,9 @@ class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
     @abstractmethod
     def exchange_id(cls) -> str:
         ...
+
+    def _connector_kind(self) -> str:
+        return "perpetual"
 
     @abstractmethod
     def start(

@@ -8,7 +8,6 @@ import threading
 import time
 from typing import Any
 
-import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
@@ -82,7 +81,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = GATE_FUTURES_API + path
-        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
+        r = self._request_limited(url, params or {}, self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         return r.json()
 

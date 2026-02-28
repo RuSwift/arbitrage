@@ -8,7 +8,6 @@ import threading
 import time
 from typing import Any
 
-import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
@@ -79,7 +78,7 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         url = MEXC_CONTRACT_API + path
-        r = requests.get(url, params=params or {}, timeout=self.REQUEST_TIMEOUT_SEC)
+        r = self._request_limited(url, params or {}, self.REQUEST_TIMEOUT_SEC)
         r.raise_for_status()
         data = r.json()
         if isinstance(data, dict) and data.get("success") is False and data.get("code", 0) != 0:
@@ -144,7 +143,9 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
             contracts = raw
         else:
             try:
-                r = requests.get(MEXC_CONTRACT_API + "/api/v1/contract/ticker", timeout=self.REQUEST_TIMEOUT_SEC)
+                r = self._request_limited(
+                    MEXC_CONTRACT_API + "/api/v1/contract/ticker", {}, self.REQUEST_TIMEOUT_SEC
+                )
                 r.raise_for_status()
                 data = r.json()
                 ticker_data = data.get("data", data)

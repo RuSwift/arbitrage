@@ -36,6 +36,7 @@ from app.cex import (
     OkxSpotConnector,
 )
 from app.cex.base import BaseCEXPerpetualConnector, BaseCEXSpotConnector
+from app.cex.rest_rate_limit import get_tracker
 from app.cex.dto import (
     BookDepth,
     CandleStick,
@@ -81,9 +82,11 @@ def _run(
     kind: str,
     cmc_top: int,
     db_session: Session,
+    window_sec: int = 60,
     log: logging.Logger | None = None,
 ) -> None:
     log = log or logger
+    get_tracker(window_sec=float(window_sec))
     job_start = _utc_now()
     log.info(
         "Crawler run started: exchange_id=%s kind=%s cmc_top=%s",
@@ -242,6 +245,12 @@ def main() -> int:
         help="Number of top tokens from CoinMarketCap (default 500).",
     )
     parser.add_argument(
+        "--window-sec",
+        type=int,
+        default=60,
+        help="Rate limit window in seconds (default 60).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -271,6 +280,7 @@ def main() -> int:
             kind=args.kind,
             cmc_top=args.cmc_top,
             db_session=session,
+            window_sec=args.window_sec,
             log=logger,
         )
         logger.info("Crawler finished successfully")
