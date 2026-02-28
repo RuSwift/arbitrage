@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 """
 Скрипт обхода котировок по бирже: загрузка токенов из CMC, создание CrawlerJob/CrawlerIteration,
 заполнение цен (get_pairs), затем по каждому токену depth, klines, funding_rate (для фьючерсов).
 
 Запуск:
-  python -m app.crawler --exchange-id bybit --kind spot --cmc-top 500
-  python -m app.crawler --exchange-id binance --kind perpetual --cmc-top 200
+  python scripts/crawler.py --exchange-id bybit --kind spot --cmc-top 500
+  python scripts/crawler.py --exchange-id binance --kind perpetual --cmc-top 200
 """
 
 from __future__ import annotations
@@ -14,6 +15,12 @@ import logging
 import sys
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
+
+# project root
+_project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_project_root))
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -38,11 +45,7 @@ from app.cex import (
 from app.cex.base import BaseCEXPerpetualConnector, BaseCEXSpotConnector
 from app.cex.rest_rate_limit import get_tracker
 from app.cex.dto import (
-    BookDepth,
-    CandleStick,
     CurrencyPair,
-    FundingRate,
-    FundingRatePoint,
 )
 from app.db.models import CrawlerIteration, CrawlerJob
 from app.market.coinmarketcap import CoinMarketCapConnector
