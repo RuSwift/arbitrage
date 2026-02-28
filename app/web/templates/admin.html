@@ -82,10 +82,18 @@
     </style>
 </head>
 <body class="bg-light">
+    <header class="border-bottom bg-white mb-3">
+        <nav class="container-fluid py-2 d-flex align-items-center gap-3">
+            <a href="/admin" class="text-decoration-none fw-semibold text-dark">Crawler Admin</a>
+            <a href="/bookdepth" class="text-decoration-none text-secondary">Book Depth</a>
+        </nav>
+    </header>
     <div id="admin-app" class="container-fluid py-4">
         <crawler-admin></crawler-admin>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.min.js"></script>
+    <script src="/static/js/bookdepth.js"></script>
+    <script src="/static/js/klines.js"></script>
     <script src="/static/js/admin.js"></script>
     <script>
         new Vue({ el: '#admin-app' });
