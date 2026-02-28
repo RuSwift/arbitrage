@@ -335,7 +335,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         result = msg.get("result")
         if not result:
             return
-        # Gate may send result as a single dict or as a list of dicts
+        # Gate may send result as a single dict or as a list of dicts (or mixed)
         if isinstance(result, dict):
             payloads = [result]
         elif isinstance(result, list):
@@ -343,10 +343,19 @@ class GateSpotConnector(BaseCEXSpotConnector):
         else:
             return
         for result in payloads:
+            if not isinstance(result, dict):
+                continue
             if channel == "spot.book_ticker":
                 s = result.get("s", "")
+                if not s:
+                    continue
+                s_key = s.upper() if isinstance(s, str) else s
                 sym = _gate_to_symbol(s)
-                ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
+                ticker = (
+                    self._cached_tickers_dict.get(s)
+                    or self._cached_tickers_dict.get(s_key)
+                    or self._cached_tickers_dict.get(sym)
+                )
                 if not ticker or not self._throttler.may_pass(ticker.symbol, tag="book"):
                     continue
                 b, B = result.get("b", "0"), result.get("B", "0")
@@ -364,8 +373,15 @@ class GateSpotConnector(BaseCEXSpotConnector):
                 )
             elif channel == "spot.order_book_update":
                 s = result.get("s", "")
+                if not s:
+                    continue
+                s_key = s.upper() if isinstance(s, str) else s
                 sym = _gate_to_symbol(s)
-                ticker = self._cached_tickers_dict.get(s) or self._cached_tickers_dict.get(sym)
+                ticker = (
+                    self._cached_tickers_dict.get(s)
+                    or self._cached_tickers_dict.get(s_key)
+                    or self._cached_tickers_dict.get(sym)
+                )
                 if not ticker or not self._throttler.may_pass(ticker.symbol, tag="depth"):
                     continue
                 bids = result.get("b", [])
@@ -374,8 +390,18 @@ class GateSpotConnector(BaseCEXSpotConnector):
                     bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
                     ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
                 else:
-                    bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
-                    ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
+                    bid_list = []
+                    ask_list = []
+                    for x in bids:
+                        if isinstance(x, (list, tuple)) and len(x) >= 2:
+                            bid_list.append(BidAsk(price=float(x[0]), quantity=float(x[1])))
+                        elif isinstance(x, dict):
+                            bid_list.append(BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))))
+                    for x in asks:
+                        if isinstance(x, (list, tuple)) and len(x) >= 2:
+                            ask_list.append(BidAsk(price=float(x[0]), quantity=float(x[1])))
+                        elif isinstance(x, dict):
+                            ask_list.append(BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))))
                 self._cb.handle(
                     depth=BookDepth(
                         symbol=ticker.symbol,

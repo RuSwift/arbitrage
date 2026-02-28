@@ -69,6 +69,8 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
     REQUEST_TIMEOUT_SEC = 15
     DEPTH_API_MAX = 100
     KLINE_SIZE = 60
+    BOOK_LEN = 25
+    """Order book length for WS book subscription."""
     WS_CONNECT_WAIT_ATTEMPTS = 10
     WS_CONNECT_WAIT_SEC = 1
 
@@ -134,6 +136,16 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             raise RuntimeError("Bitfinex deriv WebSocket connection failed.")
         for ex_sym in syms:
             self._ws.send(json.dumps({"event": "subscribe", "channel": "status", "key": f"deriv:{ex_sym}"}))
+            if depth:
+                self._ws.send(
+                    json.dumps({
+                        "event": "subscribe",
+                        "channel": "book",
+                        "symbol": ex_sym,
+                        "prec": "P0",
+                        "len": str(self.BOOK_LEN),
+                    })
+                )
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -373,18 +385,25 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         except Exception:
             return
         if isinstance(msg, dict):
-            if msg.get("event") == "subscribed" and msg.get("channel") == "status":
-                self._chan_to_sym[msg.get("chanId", -1)] = msg.get("key", "").replace("deriv:", "")
+            if msg.get("event") == "subscribed":
+                cid = msg.get("chanId", -1)
+                ch = msg.get("channel", "")
+                if ch == "status":
+                    self._chan_to_sym[cid] = msg.get("key", "").replace("deriv:", "")
+                elif ch == "book":
+                    self._chan_to_sym[cid] = msg.get("symbol", "")
             return
         if not isinstance(msg, list) or len(msg) < 2:
             return
         ch_id, payload = msg[0], msg[1]
-        key = self._chan_to_sym.get(ch_id, "")
-        ex_sym = key.replace("deriv:", "") if key else ""
+        ex_sym = self._chan_to_sym.get(ch_id, "").replace("deriv:", "")
         ticker = self._cached_perps_dict.get(ex_sym)
         if not ticker:
             return
-        if isinstance(payload, list) and len(payload) >= 16:
+        if not isinstance(payload, list):
+            return
+        # Status channel: single array with 16+ elements (deriv status)
+        if len(payload) >= 16 and not isinstance(payload[0], list):
             if not self._throttler.may_pass(ticker.symbol, tag="book"):
                 return
             mark = payload[15] if len(payload) > 15 else payload[3]
@@ -400,16 +419,46 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
                         utc=float(payload[1]) / 1000 if len(payload) > 1 and payload[1] else None,
                     )
                 )
-            deriv_mid = payload[3] if len(payload) > 3 else None
-            if deriv_mid is not None and mark is None:
-                self._cb.handle(
-                    book=BookTicker(
-                        symbol=ticker.symbol,
-                        bid_price=float(deriv_mid),
-                        bid_qty=0.0,
-                        ask_price=float(deriv_mid),
-                        ask_qty=0.0,
-                        last_update_id=payload[1] if len(payload) > 1 else None,
-                        utc=float(payload[1]) / 1000 if len(payload) > 1 and payload[1] else None,
+            else:
+                deriv_mid = payload[3] if len(payload) > 3 else None
+                if deriv_mid is not None:
+                    self._cb.handle(
+                        book=BookTicker(
+                            symbol=ticker.symbol,
+                            bid_price=float(deriv_mid),
+                            bid_qty=0.0,
+                            ask_price=float(deriv_mid),
+                            ask_qty=0.0,
+                            last_update_id=payload[1] if len(payload) > 1 else None,
+                            utc=float(payload[1]) / 1000 if len(payload) > 1 and payload[1] else None,
+                        )
                     )
-                )
+            return
+        # Book channel: snapshot (array of [price, count, amount]) or update (single [price, count, amount])
+        if not self._throttler.may_pass(ticker.symbol, tag="depth"):
+            return
+        if len(payload) > 0 and isinstance(payload[0], list):
+            # Snapshot
+            bids = [BidAsk(price=float(x[0]), quantity=float(x[2])) for x in payload if len(x) >= 3 and x[2] > 0]
+            asks = [BidAsk(price=float(x[0]), quantity=float(-x[2])) for x in payload if len(x) >= 3 and x[2] < 0]
+        elif len(payload) >= 3 and isinstance(payload[0], (int, float)):
+            # Single-level update
+            price, count, amount = payload[0], payload[1], payload[2]
+            if amount > 0:
+                bids = [BidAsk(price=float(price), quantity=float(amount))]
+                asks = []
+            else:
+                bids = []
+                asks = [BidAsk(price=float(price), quantity=float(-amount))]
+        else:
+            return
+        self._cb.handle(
+            depth=BookDepth(
+                symbol=ticker.symbol,
+                exchange_symbol=ex_sym,
+                bids=bids,
+                asks=asks,
+                last_update_id=ch_id,
+                utc=_utc_now_float(),
+            )
+        )

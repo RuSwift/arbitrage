@@ -113,13 +113,15 @@ class TestSpotConnector:
     def test_book_events(
         self, connector: BaseCEXSpotConnector, valid_pair_code: str
     ) -> None:
+        if connector.exchange_id() == "mexc":
+            pytest.skip("MEXC spot uses REST polling only, no WebSocket book/depth")
         cb = TestableCallback()
         connector.start(cb, symbols=[valid_pair_code, "BTC/INVALID"])
         sleep(5)
         connector.stop()
         sleep(1)  # let websocket threads (e.g. pybit ping) exit before teardown
-        assert len(cb.books) > 0 or len(cb.depths) > 0, "expected at least one book or depth update"
-        if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
+        assert len(cb.books) > 0, "expected at least one book_ticker event"
+        assert len(cb.depths) > 0, "expected at least one depth event"
+        if cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
-        if cb.books:
-            common_check_book_ticker(cb.books[0])
+        common_check_book_ticker(cb.books[0])

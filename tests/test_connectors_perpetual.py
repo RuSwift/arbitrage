@@ -168,11 +168,13 @@ class TestPerpetualConnector:
     ) -> None:
         cb = TestableCallback()
         connector.start(cb, symbols=[valid_pair_code, "BTC/INVALID"])
-        sleep(5)
+        # Gate often needs longer to deliver first WS events
+        wait_sec = 20 if connector.exchange_id() == "gate" else 5
+        sleep(wait_sec)
         connector.stop()
         sleep(1)  # let websocket threads (e.g. pybit ping) exit before teardown
-        assert len(cb.books) > 0 or len(cb.depths) > 0, "expected at least one book or depth update"
-        if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
+        assert len(cb.books) > 0, "expected at least one book_ticker event"
+        assert len(cb.depths) > 0, "expected at least one depth event"
+        if cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
-        if cb.books:
-            common_check_book_ticker(cb.books[0])
+        common_check_book_ticker(cb.books[0])
