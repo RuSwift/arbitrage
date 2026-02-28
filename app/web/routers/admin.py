@@ -10,9 +10,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import CrawlerIteration, CrawlerJob
-from app.web.dependencies import get_db
+from app.web.dependencies import get_current_admin, get_db
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
 
 def _serialize_dt(value: datetime | None) -> str | None:

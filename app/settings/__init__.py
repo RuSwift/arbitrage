@@ -123,6 +123,28 @@ class RedisSettings(BaseSettings):
         return f"redis://{self.host}:{self.port}/{self.db}"
 
 
+class RootSettings(BaseSettings):
+    """Логин и пароль администратора (root)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ROOT_",
+        case_sensitive=False,
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    login: str = Field(
+        default="root",
+        description="Логин администратора (env: ROOT_LOGIN)",
+    )
+
+    password: SecretStr = Field(
+        default=SecretStr("root"),
+        description="Пароль администратора (env: ROOT_PASSWORD)",
+    )
+
+
 class CoinMarketCapSettings(BaseSettings):
     """Настройки CoinMarketCap API. API ключ обязателен (env: COINMARKETCAP_API_KEY)."""
 
@@ -172,6 +194,7 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
+    root: RootSettings = Field(default_factory=RootSettings)
     coinmarketcap: CoinMarketCapSettings = Field(default_factory=CoinMarketCapSettings)
 
 
@@ -179,5 +202,6 @@ __all__ = [
     "Settings",
     "DatabaseSettings",
     "RedisSettings",
+    "RootSettings",
     "CoinMarketCapSettings",
 ]
