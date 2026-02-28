@@ -22,9 +22,43 @@ def create_app():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+    # Side menu for admin panel (garantex-style: id, href, icon_class, label, sub, page)
+    _SIDE_MENU = [
+        {
+            "header": "Инструменты",
+            "items": [
+                {
+                    "id": "crawler",
+                    "href": "/admin",
+                    "icon_class": "bi bi-diagram-3",
+                    "label": "Crawler",
+                    "sub": [],
+                    "page": "Crawler",
+                },
+                {
+                    "id": "bookdepth",
+                    "href": "/bookdepth",
+                    "icon_class": "bi bi-graph-up",
+                    "label": "Book Depth",
+                    "sub": [],
+                    "page": None,
+                },
+            ],
+        },
+    ]
+
     @app.get("/admin", response_class=HTMLResponse)
     def admin_page(request: Request):
-        return templates.TemplateResponse("admin.html", {"request": request})
+        return templates.TemplateResponse(
+            "admin.html",
+            {
+                "request": request,
+                "app_name": "Arbitrage",
+                "side_menu": _SIDE_MENU,
+                "selected_menu": "crawler",
+                "current_page": "Crawler",
+            },
+        )
 
     return app
 

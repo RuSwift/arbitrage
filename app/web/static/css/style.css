@@ -1,0 +1,74 @@
+/* modal-window (garantex-style) */
+.modal-mask { position: fixed; z-index: 1050; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; }
+.modal-wrapper { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.modal-container { background: #fff; border-radius: 0.5rem; box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15); display: flex; flex-direction: column; max-width: 100%; }
+.modal-container .modal-header { padding: 0.75rem 1rem; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
+.modal-container .modal-body { padding: 1rem; overflow-y: auto; flex: 1; min-height: 0; }
+.modal-container .modal-footer { padding: 0.75rem 1rem; border-top: 1px solid #dee2e6; flex-shrink: 0; }
+.modal-enter-active, .modal-leave-active { transition: opacity 0.2s; }
+.modal-enter .modal-mask, .modal-leave-to .modal-mask { opacity: 0; }
+
+/* KLines candlestick */
+.klines-binance { background: #1e2329; border-radius: 0.5rem; overflow: hidden; color: #eaecef; }
+.klines-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2b3139; font-size: 0.8rem; }
+.klines-title { color: #848e9c; }
+.klines-symbol { color: #eaecef; font-weight: 500; }
+.klines-body { display: flex; flex-direction: column; min-height: 220px; }
+.klines-row { display: flex; flex: 1; min-height: 0; }
+.klines-chart-wrap { position: relative; flex: 1; height: 220px; background: #131a22; border-bottom: 1px solid #2b3139; }
+.klines-volume-selected { font-size: 0.75rem; color: #848e9c; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.klines-volume-row { display: flex; height: 40px; }
+.klines-volume-wrap { flex: 1; position: relative; min-width: 0; background: #131a22; border-bottom: 1px solid #2b3139; }
+.klines-volume-bars { position: relative; width: 100%; height: 100%; }
+.volume-bar-col { position: absolute; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; cursor: pointer; }
+.volume-bar-col .volume-bar { position: absolute; bottom: 0; width: 100%; min-height: 2px; border-radius: 1px; }
+.volume-bar-col.volume-bar-selected .volume-bar { box-shadow: 0 0 0 1px #eaecef; }
+.volume-bar.volume-up { background: rgba(14, 203, 129, 0.5); }
+.volume-bar.volume-down { background: rgba(246, 70, 93, 0.5); }
+.klines-volume-axis { width: 72px; flex-shrink: 0; position: relative; background: #131a22; border-bottom: 1px solid #2b3139; border-left: 1px solid #2b3139; font-size: 0.7rem; color: #848e9c; }
+.klines-volume-tick { position: absolute; right: 4px; transform: translateY(50%); white-space: nowrap; }
+.klines-time-row { display: flex; height: 24px; }
+.klines-time-axis { flex: 1; position: relative; min-width: 0; background: #1e2329; border-top: 1px solid #2b3139; font-size: 0.7rem; color: #848e9c; }
+.klines-time-axis-spacer { width: 72px; flex-shrink: 0; background: #1e2329; border-top: 1px solid #2b3139; border-left: 1px solid #2b3139; }
+.klines-candles { position: relative; width: 100%; height: 100%; }
+.candle-col { position: absolute; bottom: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.candle-wick { position: absolute; width: 1px; min-width: 1px; bottom: 0; background: #848e9c; }
+.candle-body { position: absolute; min-height: 2px; border-radius: 1px; }
+.candle-up { background: #0ecb81; }
+.candle-down { background: #f6465d; }
+.klines-price-axis { width: 72px; flex-shrink: 0; position: relative; background: #131a22; border-left: 1px solid #2b3139; font-size: 0.7rem; color: #848e9c; }
+.klines-price-tick { position: absolute; right: 4px; transform: translateY(50%); white-space: nowrap; }
+.klines-time-tick { position: absolute; transform: translateX(-50%); top: 4px; white-space: nowrap; }
+.iteration-detail-body { font-size: 0.875rem; }
+
+/* Order Book */
+.order-book-binance { background: #1e2329; border-radius: 0.5rem; overflow: hidden; color: #eaecef; }
+.order-book-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2b3139; font-size: 0.8rem; }
+.order-book-title { color: #848e9c; }
+.order-book-symbol { color: #eaecef; font-weight: 500; }
+.order-book-columns { display: flex; flex-wrap: wrap; align-items: stretch; }
+.order-book-col { flex: 1; min-width: 200px; }
+.order-book-divider { flex-shrink: 0; width: 4.5rem; min-width: 4.5rem; background: #1e2329; border-left: 1px solid #2b3139; border-right: 1px solid #2b3139; }
+.order-book-divider-table { width: 100%; }
+.order-book-divider-table th { padding: 0.35rem 0.4rem; color: #848e9c; font-weight: 500; text-align: center; }
+.order-book-divider-table td.order-book-pct-cell { padding: 0.2rem 0.4rem; font-size: 0.7rem; color: #848e9c; text-align: center; white-space: nowrap; }
+.order-book-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
+.order-book-table th { padding: 0.35rem 0.5rem; color: #848e9c; font-weight: 500; text-align: right; }
+.order-book-table th:first-child { text-align: left; }
+.order-book-table td { padding: 0.2rem 0.5rem; position: relative; text-align: right; }
+.order-book-table td:first-child { text-align: left; }
+.order-book-combo-th { min-width: 10rem; }
+.order-book-combo-th .ob-price-label { float: left; }
+.order-book-combo-th .ob-usd-label { float: right; }
+.order-book-combo-cell { position: relative; min-width: 10rem; padding: 0.2rem 0.5rem; }
+.order-book-combo-cell .depth-bar { position: absolute; top: 0; bottom: 0; z-index: 0; border-radius: 0; }
+.order-book-combo-cell .ob-price { position: relative; z-index: 1; float: left; }
+.order-book-combo-cell .ob-usd { position: relative; z-index: 1; float: right; }
+.order-book-combo-cell.bid-price { color: #0ecb81; }
+.order-book-combo-cell.bid-price .depth-bar { right: 0; background: rgba(14, 203, 129, 0.2); max-width: 100%; }
+.order-book-combo-cell.ask-price { color: #f6465d; }
+.order-book-combo-cell.ask-price .depth-bar { right: auto; left: 0; background: rgba(246, 70, 93, 0.2); max-width: 100%; }
+.order-book-asks .order-book-combo-th .ob-usd-label { float: left; }
+.order-book-asks .order-book-combo-th .ob-price-label { float: right; }
+.order-book-asks .order-book-combo-cell .ob-usd { float: left; }
+.order-book-asks .order-book-combo-cell .ob-price { float: right; }

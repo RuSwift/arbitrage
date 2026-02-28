@@ -379,5 +379,11 @@
             '</div>'
     });
 
+    // Страница «Crawler» в панели: обёртка над crawler-admin
+    Vue.component('Crawler', {
+        delimiters: ['[[', ']]'],
+        template: '<div class="container-fluid"><crawler-admin></crawler-admin></div>'
+    });
+
     return Vue;
 }));
