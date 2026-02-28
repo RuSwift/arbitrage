@@ -123,7 +123,7 @@ class OkxSpotConnector(BaseCEXSpotConnector):
         for inst_id in syms:
             args.append({"channel": "bbo-tbt", "instId": inst_id})
             if depth:
-                args.append({"channel": "books5", "instId": inst_id})
+                args.append({"channel": "books20", "instId": inst_id})
             if klines:
                 args.append({"channel": "candle1m", "instId": inst_id})
         self._ws.send(json.dumps({"op": "subscribe", "args": args}))

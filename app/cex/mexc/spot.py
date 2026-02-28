@@ -132,11 +132,14 @@ class MexcSpotConnector(BaseCEXSpotConnector):
                 except Exception:
                     continue
                 if isinstance(data, dict) and data.get("symbol") == ex_sym:
+                    cb = self._cb
+                    if cb is None:
+                        break
                     bid_p = data.get("bidPrice", "0")
                     ask_p = data.get("askPrice", "0")
                     bid_s = data.get("bidQty", "0")
                     ask_s = data.get("askQty", "0")
-                    self._cb.handle(
+                    cb.handle(
                         book=BookTicker(
                             symbol=ticker.symbol,
                             bid_price=float(bid_p),
@@ -153,9 +156,12 @@ class MexcSpotConnector(BaseCEXSpotConnector):
                     except Exception:
                         continue
                     if isinstance(depth_data, dict):
-                        bids = depth_data.get("bids", [])[:10]
-                        asks = depth_data.get("asks", [])[:10]
-                        self._cb.handle(
+                        cb = self._cb
+                        if cb is None:
+                            break
+                        bids = depth_data.get("bids", [])
+                        asks = depth_data.get("asks", [])
+                        cb.handle(
                             depth=BookDepth(
                                 symbol=ticker.symbol,
                                 exchange_symbol=ex_sym,
@@ -169,6 +175,9 @@ class MexcSpotConnector(BaseCEXSpotConnector):
 
     def stop(self) -> None:
         self._poll_run = False
+        poll_thread = self._poll_thread
+        if poll_thread is not None and poll_thread.is_alive():
+            poll_thread.join(timeout=2.0)
         self._poll_thread = None
         self._poll_syms = []
         if self._ws is not None:
@@ -178,7 +187,7 @@ class MexcSpotConnector(BaseCEXSpotConnector):
                 pass
             self._ws = None
         self._ws_thread = None
-        self._cb = None
+        self._cb = None  # after join so _poll_loop never sees None during handle()
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

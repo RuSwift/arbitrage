@@ -100,6 +100,7 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         if self._ws is not None:
             try:
                 self._ws.exit()
+                time.sleep(0.3)  # let pybit internal threads (e.g. ping) notice closure
             except Exception as e:
                 self.log.debug("stop: ws exit failed: %s", e)
             self._ws = None
