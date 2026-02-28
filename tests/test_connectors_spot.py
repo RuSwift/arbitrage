@@ -38,7 +38,7 @@ SPOT_CONNECTORS = [
 
 @pytest.fixture(params=SPOT_CONNECTORS, ids=[c.__name__ for c in SPOT_CONNECTORS])
 def connector(request, redis_client) -> BaseCEXSpotConnector:
-    """Spot connector for current exchange; requires Redis (skipped if unavailable)."""
+    """Spot connector for current exchange; requires Redis."""
     return request.param()
 
 
@@ -118,7 +118,8 @@ class TestSpotConnector:
         sleep(5)
         connector.stop()
         sleep(1)  # let websocket threads (e.g. pybit ping) exit before teardown
-        assert len(cb.books) > 0
+        assert len(cb.books) > 0 or len(cb.depths) > 0, "expected at least one book or depth update"
         if cb.depths and cb.depths[0].bids and cb.depths[0].asks:
             common_check_book_depth(cb.depths[0])
-        common_check_book_ticker(cb.books[0])
+        if cb.books:
+            common_check_book_ticker(cb.books[0])

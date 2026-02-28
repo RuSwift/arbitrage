@@ -33,15 +33,12 @@ def database_url():
 
 @pytest.fixture
 def redis_client(redis_url):
-    """Redis client from .env. Skips test if Redis is unavailable."""
-    try:
-        import redis
-        client = redis.from_url(redis_url)
-        client.ping()
-        yield client
-        client.close()
-    except Exception as e:
-        pytest.skip(f"Redis unavailable: {e}")
+    """Redis client from .env."""
+    import redis
+    client = redis.from_url(redis_url)
+    client.ping()
+    yield client
+    client.close()
 
 
 THROTTLE_TEST_PREFIX = "arbitrage:throttle:test"

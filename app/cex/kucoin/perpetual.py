@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Any
 
+import requests
 import websocket
 
 from app.cex.base import BaseCEXPerpetualConnector, Callback
