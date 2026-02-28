@@ -159,9 +159,10 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             if symbols is None:
                 prices = self._api.ticker_price()
             else:
+                # Только символы, которые есть на бирже (из exchange_info), иначе API вернёт 400 Invalid symbol
                 sym_list = []
                 for s in symbols:
-                    ex = self._exchange_symbol(s) or s.replace("/", "").upper()
+                    ex = self._exchange_symbol(s)
                     if ex:
                         sym_list.append(ex)
                 if not sym_list:
