@@ -204,21 +204,11 @@ class GateSpotConnector(BaseCEXSpotConnector):
     def get_pairs(self, symbols: list[str] | None = None) -> list[CurrencyPair]:
         if not self._cached_tickers_dict:
             self.get_all_tickers()
-        if symbols is None:
-            pairs = self._get("/spot/tickers")
-        else:
-            pairs = []
-            for s in symbols:
-                cp = self._exchange_symbol(s) or _symbol_to_gate(s)
-                if cp:
-                    try:
-                        r = self._get("/spot/tickers", {"currency_pair": cp})
-                        if isinstance(r, list):
-                            pairs.extend(r)
-                        elif isinstance(r, dict):
-                            pairs.append(r)
-                    except Exception:
-                        pass
+        # One request for all tickers to avoid rate limit (Gate ~100 req/min)
+        pairs = self._get("/spot/tickers")
+        if symbols is not None:
+            want = {s.upper() for s in symbols}
+            pairs = [p for p in (pairs if isinstance(pairs, list) else [pairs]) if _gate_to_symbol(p.get("currency_pair", "")) in want]
         if not isinstance(pairs, list):
             pairs = [pairs] if isinstance(pairs, dict) else []
         result: list[CurrencyPair] = []

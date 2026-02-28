@@ -208,21 +208,12 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
     def get_pairs(self, symbols: list[str] | None = None) -> list[CurrencyPair]:
         if not self._cached_perps_dict:
             self.get_all_perpetuals()
-        if symbols is None:
-            data = self._get("/futures/usdt/tickers")
-        else:
-            data = []
-            for s in symbols:
-                contract = self._exchange_symbol(s) or _symbol_to_gate(s)
-                if contract:
-                    try:
-                        r = self._get("/futures/usdt/tickers", {"contract": contract})
-                        if isinstance(r, list):
-                            data.extend(r)
-                        elif isinstance(r, dict):
-                            data.append(r)
-                    except Exception:
-                        pass
+        # One request for all tickers to avoid rate limit (Gate ~100 req/min)
+        data = self._get("/futures/usdt/tickers")
+        if symbols is not None:
+            want = {s.upper() for s in symbols}
+            raw = data if isinstance(data, list) else [data]
+            data = [row for row in raw if _gate_to_symbol(row.get("contract", "")) in want]
         if not isinstance(data, list):
             data = [data] if isinstance(data, dict) else []
         result: list[CurrencyPair] = []
