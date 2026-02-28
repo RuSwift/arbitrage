@@ -71,6 +71,7 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -118,12 +119,14 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("MEXC contract WebSocket connection failed.")
+        self._ws_depth = depth
         for ex_sym in syms:
             self._ws.send(json.dumps({"method": "sub.ticker", "param": {"symbol": ex_sym}}))
             if depth:
                 self._ws.send(json.dumps({"method": "sub.depth", "param": {"symbol": ex_sym}}))
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -132,6 +135,32 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+
+    def _resolve_tokens_to_ex_syms(self, tokens: list[str]) -> list[str]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            self._ws.send(json.dumps({"method": "sub.ticker", "param": {"symbol": ex_sym}}))
+            if getattr(self, "_ws_depth", True):
+                self._ws.send(json.dumps({"method": "sub.depth", "param": {"symbol": ex_sym}}))
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            self._ws.send(json.dumps({"method": "unsub.ticker", "param": {"symbol": ex_sym}}))
+            if getattr(self, "_ws_depth", True):
+                self._ws.send(json.dumps({"method": "unsub.depth", "param": {"symbol": ex_sym}}))
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:

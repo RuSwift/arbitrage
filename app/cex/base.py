@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 
 import requests
@@ -26,6 +27,7 @@ DEFAULT_THROTTLE_TIMEOUT = 1.0
 DEFAULT_DEPTH_LIMIT = 100  # default get_depth(limit=...) when not specified
 DEFAULT_KLINE_LIMIT = 60  # default get_klines(limit=...) when not specified
 DEFAULT_FUNDING_HISTORY_LIMIT = 100  # default get_funding_rate_history(limit=...) when not specified
+DEFAULT_SUBSCRIPTION_BATCH_SEC = 4.0  # batch interval for subscribe/unsubscribe; reconnect connectors use 15.0
 
 
 class Callback(ABC):
@@ -56,6 +58,15 @@ class _BaseCEXConnectorMixin:
             timeout=throttle_timeout, redis_url=redis_url, key_prefix=key_prefix
         )
         self.log = log if log is not None else logging.getLogger(self.__class__.__module__)
+        # Subscribe/unsubscribe batching: queues, lock, timer (started once per batch, no reset)
+        self._pending_sub: set[str] = set()
+        self._pending_unsub: set[str] = set()
+        self._sub_lock = threading.Lock()
+        self._sub_timer: threading.Timer | None = None
+        self._sub_timer_active = False
+        self._subscription_batch_sec: float = getattr(
+            self.__class__, "_subscription_batch_sec", DEFAULT_SUBSCRIPTION_BATCH_SEC
+        )
 
     def _request_limited(
         self,
@@ -73,6 +84,76 @@ class _BaseCEXConnectorMixin:
             params=params,
             timeout=timeout,
         )
+
+    def subscribe(self, tokens: list[str]) -> None:
+        """Queue tokens for subscription; applied after batch interval (timer started only if idle)."""
+        if not tokens:
+            return
+        with self._sub_lock:
+            self._pending_sub.update(tokens)
+            self._pending_unsub -= set(tokens)
+            if not self._sub_timer_active:
+                self._sub_timer_active = True
+                self._sub_timer = threading.Timer(
+                    self._subscription_batch_sec,
+                    self._flush_subscriptions,
+                )
+                self._sub_timer.daemon = True
+                self._sub_timer.start()
+
+    def unsubscribe(self, tokens: list[str]) -> None:
+        """Queue tokens for unsubscription; applied after batch interval (timer started only if idle)."""
+        if not tokens:
+            return
+        with self._sub_lock:
+            self._pending_unsub.update(tokens)
+            self._pending_sub -= set(tokens)
+            if not self._sub_timer_active:
+                self._sub_timer_active = True
+                self._sub_timer = threading.Timer(
+                    self._subscription_batch_sec,
+                    self._flush_subscriptions,
+                )
+                self._sub_timer.daemon = True
+                self._sub_timer.start()
+
+    def _flush_subscriptions(self) -> None:
+        """Run under timer callback: take snapshot, clear state, call _apply_* and _after_subscription_flush."""
+        with self._sub_lock:
+            to_sub = list(self._pending_sub)
+            to_unsub = list(self._pending_unsub)
+            self._pending_sub.clear()
+            self._pending_unsub.clear()
+            if self._sub_timer is not None:
+                self._sub_timer.cancel()
+                self._sub_timer = None
+            self._sub_timer_active = False
+        if to_sub or to_unsub:
+            self._apply_unsubscribe(to_unsub)
+            self._apply_subscribe(to_sub)
+            self._after_subscription_flush()
+
+    def _cancel_subscription_timer(self) -> None:
+        """Cancel batch timer and clear pending queues. Call from stop()."""
+        with self._sub_lock:
+            if self._sub_timer is not None:
+                self._sub_timer.cancel()
+                self._sub_timer = None
+            self._sub_timer_active = False
+            self._pending_sub.clear()
+            self._pending_unsub.clear()
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        """Override in connectors that support dynamic subscribe. Default: no-op."""
+        pass
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        """Override in connectors that support dynamic subscribe. Default: no-op."""
+        pass
+
+    def _after_subscription_flush(self) -> None:
+        """Override in reconnect-type connectors to run stop/start after batch. Default: no-op."""
+        pass
 
 
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):

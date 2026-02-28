@@ -167,6 +167,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
             raise RuntimeError("KuCoin spot WebSocket connection failed.")
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -176,6 +177,58 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         self._ws_thread = None
         self._cb = None
         self._pending_syms = []
+
+    def _resolve_tokens_to_ex_syms(self, tokens: list[str]) -> list[str]:
+        if not self._cached_tickers_dict:
+            self.get_all_tickers()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        depth = getattr(self, "_pending_depth", True)
+        for i, ex_sym in enumerate(self._resolve_tokens_to_ex_syms(tokens)):
+            self._ws.send(
+                json.dumps(
+                    {
+                        "id": f"ticker-{int(time.time() * 1000)}-{i}",
+                        "type": "subscribe",
+                        "topic": f"/market/ticker:{ex_sym}",
+                        "response": True,
+                    }
+                )
+            )
+            if depth:
+                self._ws.send(
+                    json.dumps(
+                        {
+                            "id": f"depth-{int(time.time() * 1000)}-{i}",
+                            "type": "subscribe",
+                            "topic": f"/spotMarket/level2Depth50:{ex_sym}",
+                            "response": True,
+                        }
+                    )
+                )
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        depth = getattr(self, "_pending_depth", True)
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            self._ws.send(
+                json.dumps({"type": "unsubscribe", "topic": f"/market/ticker:{ex_sym}"})
+            )
+            if depth:
+                self._ws.send(
+                    json.dumps(
+                        {"type": "unsubscribe", "topic": f"/spotMarket/level2Depth50:{ex_sym}"}
+                    )
+                )
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

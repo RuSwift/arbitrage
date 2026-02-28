@@ -41,6 +41,7 @@ def _build_perp_dict(tickers: list[PerpetualTicker]) -> dict[str, PerpetualTicke
 class BybitPerpetualConnector(BaseCEXPerpetualConnector):
     """Bybit linear perpetual. REST + WebSocket."""
 
+    _subscription_batch_sec = 15.0  # reconnect-based; batch longer to reduce reconnects
     KLINE_WINDOW_SECS = 60 * 60
     KLINE_SIZE = 60
     ORDERBOOK_BOOK_DEPTH = 1
@@ -59,6 +60,8 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
         self._api = MarketHTTP(testnet=is_testing)
         self._ws: WebSocket | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
+        self._ws_subscribed_symbols: set[str] = set()
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -87,12 +90,15 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
                 if t.symbol in symbols or t.exchange_symbol in symbols
             ]
         self._cb = cb
+        self._ws_depth = depth
+        self._ws_subscribed_symbols = set(syms)
         for sym in syms:
             self._ws.orderbook_stream(depth=self.ORDERBOOK_BOOK_DEPTH, symbol=sym, callback=self._on_ws_message)
             if depth:
                 self._ws.orderbook_stream(depth=self.ORDERBOOK_DEPTH_LEVELS, symbol=sym, callback=self._on_ws_message)
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.exit()
@@ -100,6 +106,36 @@ class BybitPerpetualConnector(BaseCEXPerpetualConnector):
                 self.log.debug("stop: ws exit failed: %s", e)
             self._ws = None
         self._cb = None
+        self._ws_subscribed_symbols = set()
+        self._ws_depth = True
+
+    def _resolve_tokens_to_exchange_symbols(self, tokens: list[str]) -> list[str]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        for ex_sym in self._resolve_tokens_to_exchange_symbols(tokens):
+            self._ws_subscribed_symbols.add(ex_sym)
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        for ex_sym in self._resolve_tokens_to_exchange_symbols(tokens):
+            self._ws_subscribed_symbols.discard(ex_sym)
+
+    def _after_subscription_flush(self) -> None:
+        if self._ws is None:
+            return
+        new_symbols = list(self._ws_subscribed_symbols)
+        cb = self._cb
+        depth = self._ws_depth
+        self.stop()
+        if new_symbols and cb is not None:
+            self.start(cb, new_symbols, depth)
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:

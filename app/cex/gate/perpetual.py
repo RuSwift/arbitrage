@@ -74,6 +74,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
         self._depth_cache: dict[str, dict] = {}
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -122,6 +123,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("Gate futures WebSocket connection failed.")
+        self._ws_depth = depth
         for contract in syms:
             self._ws_send("futures.book_ticker", "subscribe", [contract])
             if depth:
@@ -139,6 +141,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws.send(json.dumps(msg))
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -148,6 +151,28 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = None
         self._cb = None
         self._depth_cache.clear()
+
+    def _resolve_tokens_to_contracts(self, tokens: list[str]) -> list[str]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        out: list[str] = []
+        for t in tokens:
+            c = self._exchange_symbol(t)
+            if c:
+                out.append(c)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        for contract in self._resolve_tokens_to_contracts(tokens):
+            self._ws_send("futures.book_ticker", "subscribe", [contract])
+            if getattr(self, "_ws_depth", True):
+                self._ws_send("futures.order_book_update", "subscribe", [contract, "100ms", "100"])
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        for contract in self._resolve_tokens_to_contracts(tokens):
+            self._ws_send("futures.book_ticker", "unsubscribe", [contract])
+            if getattr(self, "_ws_depth", True):
+                self._ws_send("futures.order_book_update", "unsubscribe", [contract, "100ms", "100"])
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:

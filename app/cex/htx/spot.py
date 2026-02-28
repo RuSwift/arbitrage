@@ -68,6 +68,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
         self._ws: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -113,6 +114,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("HTX spot WebSocket connection failed.")
+        self._ws_depth = depth
         for ex_sym in syms:
             self._ws.send(
                 json.dumps({"sub": f"market.{ex_sym.lower()}.bbo", "id": f"bbo_{ex_sym}"})
@@ -129,6 +131,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
                 )
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -137,6 +140,40 @@ class HtxSpotConnector(BaseCEXSpotConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+
+    def _resolve_tokens_to_ex_syms(self, tokens: list[str]) -> list[str]:
+        if not self._cached_tickers_dict:
+            self.get_all_tickers()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            ex_lo = ex_sym.lower()
+            self._ws.send(json.dumps({"sub": f"market.{ex_lo}.bbo", "id": f"bbo_{ex_sym}"}))
+            if getattr(self, "_ws_depth", True):
+                self._ws.send(
+                    json.dumps(
+                        {"sub": f"market.{ex_lo}.depth.step1", "id": f"depth_{ex_sym}"}
+                    )
+                )
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            ex_lo = ex_sym.lower()
+            self._ws.send(json.dumps({"unsub": f"market.{ex_lo}.bbo", "id": f"bbo_{ex_sym}"}))
+            if getattr(self, "_ws_depth", True):
+                self._ws.send(
+                    json.dumps({"unsub": f"market.{ex_lo}.depth.step1", "id": f"depth_{ex_sym}"})
+                )
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

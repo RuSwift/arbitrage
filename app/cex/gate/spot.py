@@ -71,6 +71,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         self._ws: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -119,6 +120,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("Gate spot WebSocket connection failed.")
+        self._ws_depth = depth
         for cp in syms:
             self._ws_send("spot.book_ticker", "subscribe", [cp])
             if depth:
@@ -136,6 +138,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         self._ws.send(json.dumps(msg))
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -144,6 +147,28 @@ class GateSpotConnector(BaseCEXSpotConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+
+    def _resolve_tokens_to_cps(self, tokens: list[str]) -> list[str]:
+        if not self._cached_tickers_dict:
+            self.get_all_tickers()
+        out: list[str] = []
+        for t in tokens:
+            cp = self._exchange_symbol(t) or _symbol_to_gate(t)
+            if cp:
+                out.append(cp)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        for cp in self._resolve_tokens_to_cps(tokens):
+            self._ws_send("spot.book_ticker", "subscribe", [cp])
+            if getattr(self, "_ws_depth", True):
+                self._ws_send("spot.obu", "subscribe", [f"ob.{cp}.50"])
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        for cp in self._resolve_tokens_to_cps(tokens):
+            self._ws_send("spot.book_ticker", "unsubscribe", [cp])
+            if getattr(self, "_ws_depth", True):
+                self._ws_send("spot.obu", "unsubscribe", [f"ob.{cp}.50"])
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

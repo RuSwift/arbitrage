@@ -42,6 +42,7 @@ def _build_tickers_dict(tickers: list[Ticker]) -> dict[str, Ticker]:
 class BinanceSpotConnector(BaseCEXSpotConnector):
     """Binance spot. REST + WebSocket."""
 
+    _subscription_batch_sec = 15.0  # reconnect-based; batch longer to reduce reconnects
     DEPTH_API_MAX = 5000
     """Max orderbook depth allowed by Binance spot API."""
     KLINE_SIZE = 60
@@ -60,6 +61,8 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         self._api = Spot(base_url=base_url)
         self._ws: BinanceWebsocketClient | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
+        self._ws_subscribed_symbols: set[str] = set()
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -78,10 +81,12 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
         if symbols is None:
             syms = [t.exchange_symbol for t in self._cached_tickers if t.exchange_symbol]
         else:
+            symbols_set = {s.lower() for s in symbols}
             syms = [
                 t.exchange_symbol
                 for t in self._cached_tickers
-                if t.exchange_symbol and t.symbol in symbols
+                if t.exchange_symbol
+                and (t.symbol in symbols or (t.exchange_symbol or "").lower() in symbols_set)
             ]
         syms = [s.lower() for s in syms]
         if not syms:
@@ -94,8 +99,11 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                 streams.append(f"{s}@depth20@100ms")
         stream_url = "wss://stream.binance.com:9443/stream?streams=" + "/".join(streams)
         self._ws = BinanceWebsocketClient(stream_url, on_message=self._on_ws_message)
+        self._ws_depth = depth
+        self._ws_subscribed_symbols = {s for s in syms}
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.stop()
@@ -103,6 +111,36 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
                 self.log.debug("stop: ws stop failed: %s", e)
             self._ws = None
         self._cb = None
+        self._ws_subscribed_symbols = set()
+        self._ws_depth = True
+
+    def _resolve_tokens_to_exchange_symbols(self, tokens: list[str]) -> list[str]:
+        if not self._cached_tickers_dict:
+            self.get_all_tickers()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex.lower())
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        for ex_sym in self._resolve_tokens_to_exchange_symbols(tokens):
+            self._ws_subscribed_symbols.add(ex_sym)
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        for ex_sym in self._resolve_tokens_to_exchange_symbols(tokens):
+            self._ws_subscribed_symbols.discard(ex_sym)
+
+    def _after_subscription_flush(self) -> None:
+        if self._ws is None:
+            return
+        new_symbols = list(self._ws_subscribed_symbols)
+        cb = self._cb
+        depth = self._ws_depth
+        self.stop()
+        if new_symbols and cb is not None:
+            self.start(cb, new_symbols, depth)
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

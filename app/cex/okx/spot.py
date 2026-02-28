@@ -70,6 +70,7 @@ class OkxSpotConnector(BaseCEXSpotConnector):
         self._ws: websocket.WebSocketApp | None = None
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -118,6 +119,7 @@ class OkxSpotConnector(BaseCEXSpotConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("OKX spot WebSocket connection failed.")
+        self._ws_depth = depth
         args = []
         for inst_id in syms:
             args.append({"channel": "bbo-tbt", "instId": inst_id})
@@ -126,6 +128,7 @@ class OkxSpotConnector(BaseCEXSpotConnector):
         self._ws.send(json.dumps({"op": "subscribe", "args": args}))
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -134,6 +137,42 @@ class OkxSpotConnector(BaseCEXSpotConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+
+    def _resolve_tokens_to_inst_id(self, tokens: list[str]) -> list[str]:
+        if not self._cached_tickers_dict:
+            self.get_all_tickers()
+        out: list[str] = []
+        for t in tokens:
+            inst_id = self._exchange_symbol(t) or _symbol_to_okx(t)
+            if inst_id:
+                out.append(inst_id)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        inst_ids = self._resolve_tokens_to_inst_id(tokens)
+        if not inst_ids:
+            return
+        args: list[dict] = []
+        for inst_id in inst_ids:
+            args.append({"channel": "bbo-tbt", "instId": inst_id})
+            if getattr(self, "_ws_depth", True):
+                args.append({"channel": "books5", "instId": inst_id})
+        self._ws.send(json.dumps({"op": "subscribe", "args": args}))
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        inst_ids = self._resolve_tokens_to_inst_id(tokens)
+        if not inst_ids:
+            return
+        args: list[dict] = []
+        for inst_id in inst_ids:
+            args.append({"channel": "bbo-tbt", "instId": inst_id})
+            if getattr(self, "_ws_depth", True):
+                args.append({"channel": "books5", "instId": inst_id})
+        self._ws.send(json.dumps({"op": "unsubscribe", "args": args}))
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:

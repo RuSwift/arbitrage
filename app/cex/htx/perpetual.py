@@ -121,6 +121,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             )
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -129,6 +130,34 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
         self._ws_thread = None
         self._cb = None
+
+    def _resolve_tokens_to_contracts(self, tokens: list[str]) -> list[str]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        out: list[str] = []
+        for t in tokens:
+            c = self._exchange_symbol(t)
+            if c:
+                out.append(c)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for contract in self._resolve_tokens_to_contracts(tokens):
+            self._ws.send(
+                json.dumps(
+                    {"sub": f"market.{contract}.depth.step1", "id": f"depth_{contract}"}
+                )
+            )
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for contract in self._resolve_tokens_to_contracts(tokens):
+            self._ws.send(
+                json.dumps({"unsub": f"market.{contract}.depth.step1", "id": f"depth_{contract}"})
+            )
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:

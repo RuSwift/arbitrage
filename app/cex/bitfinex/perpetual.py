@@ -87,6 +87,8 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
         self._chan_to_sym: dict[int, str] = {}
+        self._sym_to_chan_ids: dict[str, list[int]] = {}
+        self._ws_depth = True
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -134,6 +136,7 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
             self._ws_thread = None
             raise RuntimeError("Bitfinex deriv WebSocket connection failed.")
+        self._ws_depth = depth
         for ex_sym in syms:
             self._ws.send(json.dumps({"event": "subscribe", "channel": "status", "key": f"deriv:{ex_sym}"}))
             if depth:
@@ -148,6 +151,7 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
                 )
 
     def stop(self) -> None:
+        self._cancel_subscription_timer()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -157,6 +161,41 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = None
         self._cb = None
         self._chan_to_sym = {}
+        self._sym_to_chan_ids = {}
+
+    def _resolve_tokens_to_ex_syms(self, tokens: list[str]) -> list[str]:
+        if not self._cached_perps_dict:
+            self.get_all_perpetuals()
+        out: list[str] = []
+        for t in tokens:
+            ex = self._exchange_symbol(t)
+            if ex:
+                out.append(ex)
+        return out
+
+    def _apply_subscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            self._ws.send(json.dumps({"event": "subscribe", "channel": "status", "key": f"deriv:{ex_sym}"}))
+            if getattr(self, "_ws_depth", True):
+                self._ws.send(
+                    json.dumps({
+                        "event": "subscribe",
+                        "channel": "book",
+                        "symbol": ex_sym,
+                        "prec": "P0",
+                        "len": str(self.BOOK_LEN),
+                    })
+                )
+
+    def _apply_unsubscribe(self, tokens: list[str]) -> None:
+        if not self._ws or not self._ws.sock or not self._ws.sock.connected:
+            return
+        for ex_sym in self._resolve_tokens_to_ex_syms(tokens):
+            chan_ids = self._sym_to_chan_ids.pop(ex_sym, [])
+            for cid in chan_ids:
+                self._ws.send(json.dumps({"event": "unsubscribe", "chanId": cid}))
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:
@@ -389,9 +428,13 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
                 cid = msg.get("chanId", -1)
                 ch = msg.get("channel", "")
                 if ch == "status":
-                    self._chan_to_sym[cid] = msg.get("key", "").replace("deriv:", "")
+                    ex_sym = msg.get("key", "").replace("deriv:", "")
+                    self._chan_to_sym[cid] = ex_sym
+                    self._sym_to_chan_ids.setdefault(ex_sym, []).append(cid)
                 elif ch == "book":
-                    self._chan_to_sym[cid] = msg.get("symbol", "")
+                    ex_sym = msg.get("symbol", "")
+                    self._chan_to_sym[cid] = ex_sym
+                    self._sym_to_chan_ids.setdefault(ex_sym, []).append(cid)
             return
         if not isinstance(msg, list) or len(msg) < 2:
             return
