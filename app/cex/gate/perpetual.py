@@ -432,8 +432,18 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                 bid_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in bids]
                 ask_list = [BidAsk(price=float(x.get("p", 0)), quantity=float(x.get("s", 0))) for x in asks]
             else:
-                bid_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in bids]
-                ask_list = [BidAsk(price=float(p), quantity=float(q)) for p, q in asks]
+                # Gate может присылать [["p","s"], [price, qty], ...] — пропускаем нечисловые строки
+                def _to_bidask_rows(rows: list) -> list:
+                    out = []
+                    for row in rows:
+                        if isinstance(row, (list, tuple)) and len(row) >= 2:
+                            try:
+                                out.append(BidAsk(price=float(row[0]), quantity=float(row[1])))
+                            except (TypeError, ValueError):
+                                pass
+                    return out
+                bid_list = _to_bidask_rows(bids)
+                ask_list = _to_bidask_rows(asks)
             u = result.get("u")
             t = float(result.get("t", 0)) / 1000
             cache = self._depth_cache.setdefault(ticker.symbol, {"bids": None, "asks": None, "u": None, "t": 0.0})
