@@ -82,6 +82,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -119,6 +120,10 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
                     {"sub": f"market.{contract}.depth.step1", "id": f"depth_{contract}"}
                 )
             )
+            if klines:
+                self._ws.send(
+                    json.dumps({"sub": f"market.{contract}.kline.1min", "id": f"kline_{contract}"})
+                )
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -344,13 +349,30 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws.send(json.dumps({"pong": msg["ping"]}))
             return
         ch = msg.get("ch", "")
-        if "depth" not in ch:
-            return
         if "tick" not in msg:
             return
         contract = ch.split(".")[1] if "." in ch else ""
         sym = _contract_to_symbol(contract)
+        if not sym:
+            return
         tick = msg["tick"]
+        if ".kline." in ch:
+            if not self._throttler.may_pass(sym, tag="kline"):
+                return
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(tick.get("id", 0)),
+                    open_price=float(tick.get("open", 0)),
+                    high_price=float(tick.get("high", 0)),
+                    low_price=float(tick.get("low", 0)),
+                    close_price=float(tick.get("close", 0)),
+                    coin_volume=float(tick.get("vol", 0)),
+                    usd_volume=None,
+                )
+            )
+            return
+        if "depth" not in ch:
+            return
         if not self._throttler.may_pass(sym, tag="depth"):
             return
         bids = [BidAsk(price=float(r[0]), quantity=float(r[1])) for r in tick.get("bids", [])]

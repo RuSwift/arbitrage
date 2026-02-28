@@ -93,6 +93,7 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -127,6 +128,8 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
             args.append({"channel": "bbo-tbt", "instId": inst_id})
             if depth:
                 args.append({"channel": "books5", "instId": inst_id})
+            if klines:
+                args.append({"channel": "candle1m", "instId": inst_id})
         self._ws.send(json.dumps({"op": "subscribe", "args": args}))
 
     def stop(self) -> None:
@@ -364,10 +367,33 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
             return
         data_list = msg["data"] if isinstance(msg["data"], list) else [msg["data"]]
         channel = msg.get("arg", {}).get("channel", "") if "arg" in msg else ""
+        arg_inst = (msg.get("arg") or {}).get("instId", "")
         for data in data_list:
+            inst_id = arg_inst
+            if isinstance(data, dict):
+                inst_id = data.get("instId") or arg_inst
+            elif "candle" not in channel:
+                continue
+            if not isinstance(data, dict) and "candle" in channel:
+                if not isinstance(data, (list, tuple)) or len(data) < 6:
+                    continue
+                ticker = self._cached_perps_dict.get(arg_inst)
+                if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                    continue
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(data[0]) / 1000,
+                        open_price=float(data[1]),
+                        high_price=float(data[2]),
+                        low_price=float(data[3]),
+                        close_price=float(data[4]),
+                        coin_volume=float(data[5]),
+                        usd_volume=None,
+                    )
+                )
+                continue
             if not isinstance(data, dict):
                 continue
-            inst_id = data.get("instId") or (msg.get("arg") or {}).get("instId", "")
             ticker = self._cached_perps_dict.get(inst_id)
             if not ticker:
                 continue
@@ -403,5 +429,33 @@ class OkxPerpetualConnector(BaseCEXPerpetualConnector):
                         asks=asks,
                         last_update_id=data.get("ts"),
                         utc=float(data.get("ts", 0)) / 1000,
+                    )
+                )
+            elif "candle" in channel:
+                if not self._throttler.may_pass(sym, tag="kline"):
+                    continue
+                candle = data.get("candles") or data
+                if isinstance(candle, list) and len(candle) >= 6:
+                    arr = candle
+                elif isinstance(candle, dict):
+                    arr = [
+                        candle.get("ts", 0),
+                        candle.get("o", 0),
+                        candle.get("h", 0),
+                        candle.get("l", 0),
+                        candle.get("c", 0),
+                        candle.get("vol", 0),
+                    ]
+                else:
+                    continue
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(arr[0]) / 1000,
+                        open_price=float(arr[1]),
+                        high_price=float(arr[2]),
+                        low_price=float(arr[3]),
+                        close_price=float(arr[4]),
+                        coin_volume=float(arr[5]),
+                        usd_volume=None,
                     )
                 )

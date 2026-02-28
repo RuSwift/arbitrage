@@ -48,7 +48,8 @@ from app.cex import (
     OkxSpotConnector,
 )
 from app.cex.base import BaseCEXPerpetualConnector, BaseCEXSpotConnector, Callback
-from app.cex.dto import BookDepth, BookTicker
+from app.cex.dto import BookDepth, BookTicker, CandleStick
+from app.cex.ws_klines import WS_KLINE_UNSUPPORTED
 from app.cex.rest_rate_limit import get_tracker
 from app.market.coinmarketcap import CoinMarketCapConnector
 
@@ -69,16 +70,18 @@ EXCHANGES: dict[str, tuple[type[BaseCEXSpotConnector], type[BaseCEXPerpetualConn
 
 @dataclass
 class EventCounter(Callback):
-    """Считает события по типам (ticker, bookdepth) и фиксирует время каждого."""
+    """Считает события по типам (ticker, bookdepth, kline) и фиксирует время каждого."""
 
     timestamps: list[float] = field(default_factory=list)
     n_ticker: int = 0
     n_bookdepth: int = 0
+    n_kline: int = 0
 
     def handle(
         self,
         book: BookTicker | None = None,
         depth: BookDepth | None = None,
+        kline: CandleStick | None = None,
     ) -> None:
         t = time.time()
         self.timestamps.append(t)
@@ -86,6 +89,8 @@ class EventCounter(Callback):
             self.n_ticker += 1
         if depth is not None:
             self.n_bookdepth += 1
+        if kline is not None:
+            self.n_kline += 1
 
 
 @dataclass
@@ -136,7 +141,7 @@ def run_one(
     )
     cb = EventCounter()
     try:
-        conn.start(cb, symbols=symbols, depth=True)
+        conn.start(cb, symbols=symbols, depth=True, klines=True)
     except Exception as e:
         return RunResult(
             exchange=exchange_id,
@@ -191,7 +196,7 @@ def run_one(
         status=status,
         events_ticker=cb.n_ticker,
         events_bookdepth=cb.n_bookdepth,
-        events_kline=0,
+        events_kline=cb.n_kline,
     )
 
 
@@ -263,7 +268,8 @@ def build_markdown(
     full += table + "\n\n"
     if summary:
         full += "Summary:\n" + "\n".join(summary) + "\n"
-    full += "\n*Статистика: ticker = book_ticker, bookdepth = order_book_update; kline по WS в коннекторах не передаётся (0).*\n"
+    unsupported = ", ".join(f"{ex}/{k}" for ex, k in WS_KLINE_UNSUPPORTED)
+    full += f"\n*Статистика: ticker = book_ticker, bookdepth = order_book_update; kline по WS — где поддерживается; 0 для CEX без WS klines: {unsupported}.*\n"
     return full, summary
 
 

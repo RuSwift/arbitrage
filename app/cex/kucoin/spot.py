@@ -127,12 +127,24 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
                         }
                     )
                 )
+            if self._pending_klines:
+                self._ws.send(
+                    json.dumps(
+                        {
+                            "id": f"candles-{int(time.time() * 1000)}-{i}",
+                            "type": "subscribe",
+                            "topic": f"/market/candles:{ex_sym}_1min",
+                            "response": True,
+                        }
+                    )
+                )
 
     def start(
         self,
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -151,6 +163,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         self._cb = cb
         self._pending_syms = list(syms)
         self._pending_depth = depth
+        self._pending_klines = klines
         ws_url = self._get_ws_endpoint()
         self._ws = websocket.WebSocketApp(ws_url, on_message=self._on_ws_message)
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
@@ -164,6 +177,7 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
             self._ws = None
             self._ws_thread = None
             self._pending_syms = []
+            self._pending_klines = False
             raise RuntimeError("KuCoin spot WebSocket connection failed.")
 
     def stop(self) -> None:
@@ -367,7 +381,28 @@ class KucoinSpotConnector(BaseCEXSpotConnector):
         data = msg.get("data", msg)
         if not isinstance(data, dict):
             return
-        if "ticker" in topic:
+        if "candles" in topic:
+            ex_sym = topic.split(":")[-1].rsplit("_", 1)[0] if ":" in topic else data.get("symbol", "")
+            ticker = self._cached_tickers_dict.get(ex_sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                return
+            candles = data.get("candles", [])
+            if not candles or not isinstance(candles[0], (list, tuple)) or len(candles[0]) < 6:
+                return
+            arr = candles[0]
+            # Kucoin: [time, open, close, high, low, volume, amount]
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(arr[0]) / 1000 if len(arr) > 0 else 0,
+                    open_price=float(arr[1]),
+                    high_price=float(arr[3]),
+                    low_price=float(arr[4]),
+                    close_price=float(arr[2]),
+                    coin_volume=float(arr[5]) if len(arr) > 5 else 0,
+                    usd_volume=None,
+                )
+            )
+        elif "ticker" in topic:
             ex_sym = topic.split(":")[-1] if ":" in topic else ""
             if not ex_sym and topic == "/market/ticker:all":
                 ex_sym = (msg.get("subject") or "").replace("ticker.", "")

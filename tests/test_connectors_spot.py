@@ -5,6 +5,7 @@ from time import sleep
 import pytest
 
 from app.cex.base import BaseCEXSpotConnector
+from app.cex.ws_klines import WS_KLINE_UNSUPPORTED
 from app.cex import (
     BinanceSpotConnector,
     BitfinexSpotConnector,
@@ -127,3 +128,5 @@ class TestSpotConnector:
             common_check_book_depth(cb.depths[0])
         if cb.books:
             common_check_book_ticker(cb.books[0])
+        if (connector.exchange_id(), "spot") not in WS_KLINE_UNSUPPORTED:
+            assert len(cb.klines) > 0, "expected at least one kline event (WS klines supported)"

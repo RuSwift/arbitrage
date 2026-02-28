@@ -9,6 +9,7 @@ from app.cex.base import Callback
 from app.cex.dto import (
     BookDepth,
     BookTicker,
+    CandleStick,
     CurrencyPair,
     FundingRate,
     FundingRatePoint,
@@ -18,21 +19,25 @@ from app.cex.dto import (
 
 
 class TestableCallback(Callback):
-    """Callback that collects book and depth updates for assertions."""
+    """Callback that collects book, depth and kline updates for assertions."""
 
     def __init__(self) -> None:
         self.books: List[BookTicker] = []
         self.depths: List[BookDepth] = []
+        self.klines: List[CandleStick] = []
 
     def handle(
         self,
         book: BookTicker | None = None,
         depth: BookDepth | None = None,
+        kline: CandleStick | None = None,
     ) -> None:
         if book is not None:
             self.books.append(book)
         if depth is not None:
             self.depths.append(depth)
+        if kline is not None:
+            self.klines.append(kline)
 
 
 def common_check_ticker(obj: Ticker) -> None:

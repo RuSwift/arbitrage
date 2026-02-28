@@ -1,4 +1,5 @@
 # CEX integrations (Binance, Bybit, OKX, KuCoin, HTX, MEXC, Bitfinex, etc.)
+# WS klines: supported for all connectors except those in WS_KLINE_UNSUPPORTED.
 
 from app.cex.base import (
     BaseCEXPerpetualConnector,
@@ -28,6 +29,7 @@ from app.cex.dto import (
     WithdrawInfo,
 )
 from app.cex.throttler import Throttler
+from app.cex.ws_klines import WS_KLINE_UNSUPPORTED
 
 __all__ = [
     "BaseCEXSpotConnector",
@@ -63,6 +65,7 @@ __all__ = [
     "Ticker",
     "WithdrawInfo",
     "Throttler",
+    "WS_KLINE_UNSUPPORTED",
 ]
 
 """

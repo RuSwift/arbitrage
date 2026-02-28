@@ -120,8 +120,9 @@ class CachedSpotConnector:
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
-        self.impl.start(cb, symbols=symbols, depth=depth)
+        self.impl.start(cb, symbols=symbols, depth=depth, klines=klines)
 
     def stop(self) -> None:
         self.impl.stop()
@@ -265,8 +266,9 @@ class CachedPerpetualConnector:
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
-        self.impl.start(cb, symbols=symbols, depth=depth)
+        self.impl.start(cb, symbols=symbols, depth=depth, klines=klines)
 
     def stop(self) -> None:
         self.impl.stop()

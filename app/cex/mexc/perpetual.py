@@ -90,6 +90,7 @@ class MexcPerpetualConnector(BaseCEXPerpetualConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")

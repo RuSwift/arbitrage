@@ -70,6 +70,7 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -92,6 +93,8 @@ class BybitSpotConnector(BaseCEXSpotConnector):
             self._ws.orderbook_stream(depth=self.ORDERBOOK_BOOK_DEPTH, symbol=sym, callback=self._on_ws_message)
             if depth:
                 self._ws.orderbook_stream(depth=self.ORDERBOOK_DEPTH_LEVELS, symbol=sym, callback=self._on_ws_message)
+            if klines:
+                self._ws.kline_stream(1, sym, callback=self._on_ws_message)
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -217,13 +220,32 @@ class BybitSpotConnector(BaseCEXSpotConnector):
         if not self._cb:
             return
         topic = message.get("topic", "")
+        data = message.get("data", {})
+        if not data:
+            return
+        if topic.startswith("kline."):
+            # kline.1.BTCUSDT -> symbol BTCUSDT
+            parts = topic.split(".")
+            ex_sym = parts[-1] if len(parts) >= 3 else data.get("symbol", "")
+            ticker = self._cached_tickers_dict.get(ex_sym) if ex_sym else None
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                return
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(data.get("start", 0)) / 1000,
+                    open_price=float(data.get("open", 0)),
+                    high_price=float(data.get("high", 0)),
+                    low_price=float(data.get("low", 0)),
+                    close_price=float(data.get("close", 0)),
+                    coin_volume=float(data.get("volume", 0)),
+                    usd_volume=None,
+                )
+            )
+            return
         if not topic.startswith("orderbook."):
             return
         parts = topic.split(".")
         depth_level = parts[1] if len(parts) >= 2 else ""
-        data = message.get("data", {})
-        if not data:
-            return
         book_ev, depth_ev = self._raw_to_events(data)
         if depth_level == "1":
             depth_ev = None

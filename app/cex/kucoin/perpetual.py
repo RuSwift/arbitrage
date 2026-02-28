@@ -138,12 +138,24 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
                         }
                     )
                 )
+            if self._pending_klines:
+                self._ws.send(
+                    json.dumps(
+                        {
+                            "id": f"candles-{int(time.time() * 1000)}-{i}",
+                            "type": "subscribe",
+                            "topic": f"/contractMarket/candles:{ex_sym}_1min",
+                            "response": True,
+                        }
+                    )
+                )
 
     def start(
         self,
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -162,6 +174,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         self._cb = cb
         self._pending_syms = list(syms)
         self._pending_depth = depth
+        self._pending_klines = klines
         ws_url = self._get_ws_endpoint()
         self._ws = websocket.WebSocketApp(ws_url, on_message=self._on_ws_message)
         self._ws_thread = threading.Thread(target=lambda: self._ws.run_forever())
@@ -175,6 +188,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             self._ws = None
             self._ws_thread = None
             self._pending_syms = []
+            self._pending_klines = False
             raise RuntimeError("KuCoin futures WebSocket connection failed.")
 
     def stop(self) -> None:
@@ -442,6 +456,27 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
         if not isinstance(data, dict):
             return
         ex_sym = topic.split(":")[-1] if ":" in topic else data.get("symbol", "")
+        if "candles" in topic:
+            ex_sym = ex_sym.rsplit("_", 1)[0] if "_" in ex_sym else ex_sym
+            ticker = self._cached_perps_dict.get(ex_sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                return
+            candles = data.get("candles", [])
+            if not candles or not isinstance(candles[0], (list, tuple)) or len(candles[0]) < 6:
+                return
+            arr = candles[0]
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(arr[0]) / 1000 if len(arr) > 0 else 0,
+                    open_price=float(arr[1]),
+                    high_price=float(arr[3]),
+                    low_price=float(arr[4]),
+                    close_price=float(arr[2]),
+                    coin_volume=float(arr[5]) if len(arr) > 5 else 0,
+                    usd_volume=None,
+                )
+            )
+            return
         ticker = self._cached_perps_dict.get(ex_sym)
         if not ticker:
             return

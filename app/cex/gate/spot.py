@@ -87,6 +87,7 @@ class GateSpotConnector(BaseCEXSpotConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -123,6 +124,8 @@ class GateSpotConnector(BaseCEXSpotConnector):
             self._ws_send("spot.book_ticker", "subscribe", [cp])
             if depth:
                 self._ws_send("spot.obu", "subscribe", [f"ob.{cp}.50"])
+            if klines:
+                self._ws_send("spot.candlesticks", "subscribe", [cp, "1m"])
 
     def _ws_send(self, channel: str, event: str, payload: list[str]) -> None:
         if not self._ws or not self._ws.sock or not self._ws.sock.connected:
@@ -415,5 +418,29 @@ class GateSpotConnector(BaseCEXSpotConnector):
                         asks=ask_list,
                         last_update_id=result.get("u"),
                         utc=float(result.get("t", 0)) / 1000,
+                    )
+                )
+            elif channel == "spot.candlesticks":
+                n = result.get("n", result.get("s", ""))
+                if not n:
+                    continue
+                sym = _gate_to_symbol(n)
+                ticker = (
+                    self._cached_tickers_dict.get(n)
+                    or self._cached_tickers_dict.get(n.upper() if isinstance(n, str) else n)
+                    or self._cached_tickers_dict.get(sym)
+                )
+                if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                    continue
+                t_ms = result.get("t", 0)
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(t_ms) / 1000 if t_ms else 0,
+                        open_price=float(result.get("o", 0)),
+                        high_price=float(result.get("h", 0)),
+                        low_price=float(result.get("l", 0)),
+                        close_price=float(result.get("c", 0)),
+                        coin_volume=float(result.get("v", 0)),
+                        usd_volume=None,
                     )
                 )

@@ -29,13 +29,18 @@ DEFAULT_FUNDING_HISTORY_LIMIT = 100  # default get_funding_rate_history(limit=..
 
 
 class Callback(ABC):
-    """Protocol for real-time book/depth updates from connectors."""
+    """Protocol for real-time book/depth/kline updates from connectors.
+
+    Connectors may call handle() with any subset of book, depth, kline;
+    unsupported event types are simply not sent.
+    """
 
     @abstractmethod
     def handle(
         self,
         book: BookTicker | None = None,
         depth: BookDepth | None = None,
+        kline: CandleStick | None = None,
     ) -> None:
         ...
 
@@ -92,6 +97,7 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         ...
 
@@ -140,6 +146,7 @@ class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         ...
 

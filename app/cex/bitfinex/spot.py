@@ -79,6 +79,7 @@ class BitfinexSpotConnector(BaseCEXSpotConnector):
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
         self._chan_to_sym: dict[int, str] = {}
+        self._chan_candle: set[int] = set()
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -98,6 +99,7 @@ class BitfinexSpotConnector(BaseCEXSpotConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -130,14 +132,16 @@ class BitfinexSpotConnector(BaseCEXSpotConnector):
             self._ws.send(json.dumps({"event": "subscribe", "channel": "ticker", "symbol": ex_sym}))
             if depth:
                 self._ws.send(
-                json.dumps({
-                    "event": "subscribe",
-                    "channel": "book",
-                    "symbol": ex_sym,
-                    "prec": "P0",
-                    "len": str(self.BOOK_LEN),
-                })
-            )
+                    json.dumps({
+                        "event": "subscribe",
+                        "channel": "book",
+                        "symbol": ex_sym,
+                        "prec": "P0",
+                        "len": str(self.BOOK_LEN),
+                    })
+                )
+            if klines:
+                self._ws.send(json.dumps({"event": "subscribe", "channel": "candles", "key": f"trade:1m:{ex_sym}"}))
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -149,6 +153,7 @@ class BitfinexSpotConnector(BaseCEXSpotConnector):
         self._ws_thread = None
         self._cb = None
         self._chan_to_sym = {}
+        self._chan_candle = set()
 
     def get_all_tickers(self) -> list[Ticker]:
         if self._cached_tickers is not None:
@@ -322,13 +327,51 @@ class BitfinexSpotConnector(BaseCEXSpotConnector):
             return
         if isinstance(msg, dict):
             if msg.get("event") == "subscribed":
-                self._chan_to_sym[msg.get("chanId", -1)] = msg.get("symbol", "")
+                cid = msg.get("chanId", -1)
+                ch = msg.get("channel", "")
+                key = msg.get("key", msg.get("symbol", ""))
+                if ch == "candles" and ":" in key:
+                    self._chan_to_sym[cid] = key.split(":")[-1]
+                    self._chan_candle.add(cid)
+                else:
+                    self._chan_to_sym[cid] = key
             return
         if not isinstance(msg, list) or len(msg) < 2:
             return
         ch_id, payload = msg[0], msg[1]
         ex_sym = self._chan_to_sym.get(ch_id, "")
         if not ex_sym:
+            return
+        if ch_id in self._chan_candle:
+            ticker = self._cached_tickers_dict.get(ex_sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                return
+            if isinstance(payload, list) and len(payload) >= 6 and isinstance(payload[0], (int, float)):
+                # Bitfinex: [MTS, OPEN, CLOSE, HIGH, LOW, VOLUME]
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(payload[0]) / 1000,
+                        open_price=float(payload[1]),
+                        high_price=float(payload[3]),
+                        low_price=float(payload[4]),
+                        close_price=float(payload[2]),
+                        coin_volume=float(payload[5]),
+                        usd_volume=None,
+                    )
+                )
+            elif isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], list) and len(payload[0]) >= 6:
+                row = payload[0]
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(row[0]) / 1000,
+                        open_price=float(row[1]),
+                        high_price=float(row[3]),
+                        low_price=float(row[4]),
+                        close_price=float(row[2]),
+                        coin_volume=float(row[5]),
+                        usd_volume=None,
+                    )
+                )
             return
         ticker = self._cached_tickers_dict.get(ex_sym)
         if not ticker:

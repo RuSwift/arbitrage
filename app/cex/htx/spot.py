@@ -84,6 +84,7 @@ class HtxSpotConnector(BaseCEXSpotConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -126,6 +127,10 @@ class HtxSpotConnector(BaseCEXSpotConnector):
                             "id": f"depth_{ex_sym}",
                         }
                     )
+                )
+            if klines:
+                self._ws.send(
+                    json.dumps({"sub": f"market.{ex_sym.lower()}.kline.1min", "id": f"kline_{ex_sym}"})
                 )
 
     def stop(self) -> None:
@@ -306,5 +311,25 @@ class HtxSpotConnector(BaseCEXSpotConnector):
                     exchange_symbol=ex_sym,
                     last_update_id=int(tick.get("ts", 0)),
                     utc=float(tick.get("ts", 0)) / 1000,
+                )
+            )
+        elif ".kline." in ch:
+            parts = ch.split(".")
+            if len(parts) < 2:
+                return
+            ex_sym = parts[1]
+            sym = _exchange_to_symbol(ex_sym)
+            if not sym or not self._throttler.may_pass(sym, tag="kline"):
+                return
+            tick = msg.get("tick", {})
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(tick.get("id", 0)),
+                    open_price=float(tick.get("open", 0)),
+                    high_price=float(tick.get("high", 0)),
+                    low_price=float(tick.get("low", 0)),
+                    close_price=float(tick.get("close", 0)),
+                    coin_volume=float(tick.get("vol", 0)),
+                    usd_volume=None,
                 )
             )

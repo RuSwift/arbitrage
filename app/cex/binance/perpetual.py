@@ -85,6 +85,7 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -107,6 +108,8 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
             streams.append(f"{s}@bookTicker")
             if depth:
                 streams.append(f"{s}@depth20@100ms")
+            if klines:
+                streams.append(f"{s}@kline_1m")
         stream_url = f"{self._ws_base}/stream?streams=" + "/".join(streams)
         self._ws = websocket.WebSocketApp(
             stream_url,
@@ -398,5 +401,20 @@ class BinancePerpetualConnector(BaseCEXPerpetualConnector):
                     asks=asks,
                     last_update_id=data.get("u", data.get("lastUpdateId")),
                     utc=float(data.get("E", 0)) / 1000 if data.get("E") else None,
+                )
+            )
+        elif "kline" in stream or data.get("e") == "kline":
+            k = data.get("k") or {}
+            if not k or not self._throttler.may_pass(sym, tag="kline"):
+                return
+            self._cb.handle(
+                kline=CandleStick(
+                    utc_open_time=float(k.get("t", 0)) / 1000,
+                    open_price=float(k.get("o", 0)),
+                    high_price=float(k.get("h", 0)),
+                    low_price=float(k.get("l", 0)),
+                    close_price=float(k.get("c", 0)),
+                    coin_volume=float(k.get("v", 0)),
+                    usd_volume=None,
                 )
             )

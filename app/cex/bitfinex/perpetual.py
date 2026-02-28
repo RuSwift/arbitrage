@@ -87,6 +87,7 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread: threading.Thread | None = None
         self._cb: Callback | None = None
         self._chan_to_sym: dict[int, str] = {}
+        self._chan_candle: set[int] = set()
 
     @classmethod
     def exchange_id(cls) -> str:
@@ -106,6 +107,7 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         cb: Callback,
         symbols: list[str] | None = None,
         depth: bool = True,
+        klines: bool = True,
     ) -> None:
         if self._ws is not None:
             raise RuntimeError("WebSocket already active. Call stop() first.")
@@ -146,6 +148,8 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
                         "len": str(self.BOOK_LEN),
                     })
                 )
+            if klines:
+                self._ws.send(json.dumps({"event": "subscribe", "channel": "candles", "key": f"trade:1m:{ex_sym}"}))
 
     def stop(self) -> None:
         if self._ws is not None:
@@ -157,6 +161,7 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
         self._ws_thread = None
         self._cb = None
         self._chan_to_sym = {}
+        self._chan_candle = set()
 
     def get_all_perpetuals(self) -> list[PerpetualTicker]:
         if self._cached_perps is not None:
@@ -388,15 +393,49 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             if msg.get("event") == "subscribed":
                 cid = msg.get("chanId", -1)
                 ch = msg.get("channel", "")
+                key = msg.get("key", msg.get("symbol", ""))
                 if ch == "status":
-                    self._chan_to_sym[cid] = msg.get("key", "").replace("deriv:", "")
+                    self._chan_to_sym[cid] = key.replace("deriv:", "")
                 elif ch == "book":
                     self._chan_to_sym[cid] = msg.get("symbol", "")
+                elif ch == "candles" and ":" in key:
+                    self._chan_to_sym[cid] = key.replace("trade:1m:", "", 1)
+                    self._chan_candle.add(cid)
             return
         if not isinstance(msg, list) or len(msg) < 2:
             return
         ch_id, payload = msg[0], msg[1]
         ex_sym = self._chan_to_sym.get(ch_id, "").replace("deriv:", "")
+        if ch_id in self._chan_candle:
+            ticker = self._cached_perps_dict.get(ex_sym)
+            if not ticker or not self._throttler.may_pass(ticker.symbol, tag="kline"):
+                return
+            if isinstance(payload, list) and len(payload) >= 6 and isinstance(payload[0], (int, float)):
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(payload[0]) / 1000,
+                        open_price=float(payload[1]),
+                        high_price=float(payload[3]),
+                        low_price=float(payload[4]),
+                        close_price=float(payload[2]),
+                        coin_volume=float(payload[5]),
+                        usd_volume=None,
+                    )
+                )
+            elif isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], list) and len(payload[0]) >= 6:
+                row = payload[0]
+                self._cb.handle(
+                    kline=CandleStick(
+                        utc_open_time=float(row[0]) / 1000,
+                        open_price=float(row[1]),
+                        high_price=float(row[3]),
+                        low_price=float(row[4]),
+                        close_price=float(row[2]),
+                        coin_volume=float(row[5]),
+                        usd_volume=None,
+                    )
+                )
+            return
         ticker = self._cached_perps_dict.get(ex_sym)
         if not ticker:
             return
