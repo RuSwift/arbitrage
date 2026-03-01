@@ -11,9 +11,9 @@ jobs:
     name: Test
     runs-on: self-hosted
     env:
-      # Database (match docker-compose: postgres on 5433, redis on 6378)
+      # CI использует docker-compose.ci.yml с портами 5434, 6379 и проектом arbitrage-ci
       DB_HOST: localhost
-      DB_PORT: 5433
+      DB_PORT: 5434
       DB_USER: arbitrage
       DB_PASSWORD: arbitrage
       DB_DATABASE: arbitrage
@@ -22,7 +22,7 @@ jobs:
       DB_POOL_TIMEOUT: 30
       DB_ECHO: "false"
       REDIS_HOST: localhost
-      REDIS_PORT: 6378
+      REDIS_PORT: 6379
       REDIS_PASSWORD: arbitrage-redis-dev
       REDIS_DB: 0
       APP_NAME: Arbitrage
@@ -64,12 +64,12 @@ jobs:
       - name: Start PostgreSQL and Redis
         run: |
           export REDIS_PASSWORD=arbitrage-redis-dev
-          docker compose up -d postgres redis
+          docker compose -p arbitrage-ci -f docker-compose.ci.yml up -d postgres redis
           sleep 5
 
       - name: Wait for PostgreSQL
         run: |
-          until docker compose exec -T postgres pg_isready -U arbitrage; do
+          until docker compose -p arbitrage-ci -f docker-compose.ci.yml exec -T postgres pg_isready -U arbitrage; do
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
@@ -77,7 +77,7 @@ jobs:
 
       - name: Wait for Redis
         run: |
-          until docker compose exec -T redis redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG; do
+          until docker compose -p arbitrage-ci -f docker-compose.ci.yml exec -T redis redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG; do
             echo "Waiting for Redis..."
             sleep 2
           done
@@ -91,7 +91,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker compose down -v
+        run: docker compose -p arbitrage-ci -f docker-compose.ci.yml down -v
 
       - name: Build Docker image
         run: docker build -t arbitrage .

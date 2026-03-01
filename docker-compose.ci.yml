@@ -1,0 +1,48 @@
+# CI-only: отдельные порты (5434, 6379) и проект arbitrage-ci, чтобы не конфликтовать с продом.
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: arbitrage
+      POSTGRES_PASSWORD: arbitrage
+      POSTGRES_DB: arbitrage
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data_ci:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arbitrage"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - arbitrage-ci-network
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_ci:/data
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD}"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - arbitrage-ci-network
+
+volumes:
+  postgres_data_ci:
+    driver: local
+  redis_data_ci:
+    driver: local
+
+networks:
+  arbitrage-ci-network:
+    driver: bridge
