@@ -21,4 +21,9 @@ Docs:
 - alembic: directory with alembic setup
 - app: application packages directory
 - tests: app testing modules
+- app/services: Service classes and utils that implements business logic
+- app/cex: connectors to fetch data from CEX and orcestrators to optimize data operations
+- app/web: web application
+- app/market: extrnal market sources
+- app/settings: app settings
 

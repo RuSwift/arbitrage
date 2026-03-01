@@ -3,11 +3,29 @@
 По образцу https://github.com/RuSwift/garantex
 """
 
-from pathlib import Path
+from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, SecretStr
-from typing import Optional
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import Session as SyncSession
+
+from app.db.models import ServiceConfig
+
+logger = logging.getLogger(__name__)
+
+
+class _ExtraAllowConfig(BaseModel):
+    """Вспомогательная модель для десериализации config при model=None (extra=allow)."""
+
+    model_config = ConfigDict(extra="allow")
 
 # .env в корне проекта (родитель каталога app)
 _ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -198,10 +216,91 @@ class Settings(BaseSettings):
     coinmarketcap: CoinMarketCapSettings = Field(default_factory=CoinMarketCapSettings)
 
 
+class ServiceConfigRegistry:
+    """Реестр конфигураций сервисов в БД (таблица service_config)."""
+
+    @classmethod
+    def set(cls, db: SyncSession, config_name: str, config: BaseModel) -> None:
+        row = db.query(ServiceConfig).filter_by(service_name=config_name).first()
+        if row:
+            row.config = config.model_dump(mode="json")
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(ServiceConfig(service_name=config_name, config=config.model_dump(mode="json")))
+        db.commit()
+
+    @classmethod
+    def get(
+        cls,
+        db: SyncSession,
+        config_name: str,
+        model: type[BaseModel] | None = None,
+    ) -> BaseModel | None:
+        row = db.query(ServiceConfig).filter_by(service_name=config_name).first()
+        if row is None or row.config is None:
+            return None
+        cls = model if model is not None else _ExtraAllowConfig
+        try:
+            return cls.model_validate(row.config)
+        except ValidationError as e:
+            logger.critical(
+                "service_config validation failed: config_name=%s model=%s errors=%s",
+                config_name,
+                cls.__name__,
+                e.errors(),
+                exc_info=True,
+            )
+            return None
+
+    @classmethod
+    async def aset(cls, db: AsyncSession, config_name: str, config: BaseModel) -> None:
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(ServiceConfig).where(ServiceConfig.service_name == config_name)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.config = config.model_dump(mode="json")
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(ServiceConfig(service_name=config_name, config=config.model_dump(mode="json")))
+        await db.commit()
+
+    @classmethod
+    async def aget(
+        cls,
+        db: AsyncSession,
+        config_name: str,
+        model: type[BaseModel] | None = None,
+    ) -> BaseModel | None:
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(ServiceConfig).where(ServiceConfig.service_name == config_name)
+        )
+        row = result.scalar_one_or_none()
+        if row is None or row.config is None:
+            return None
+        cls = model if model is not None else _ExtraAllowConfig
+        try:
+            return cls.model_validate(row.config)
+        except ValidationError as e:
+            logger.critical(
+                "service_config validation failed: config_name=%s model=%s errors=%s",
+                config_name,
+                cls.__name__,
+                e.errors(),
+                exc_info=True,
+            )
+            return None
+
+
 __all__ = [
     "Settings",
     "DatabaseSettings",
     "RedisSettings",
     "RootSettings",
     "CoinMarketCapSettings",
+    "ServiceConfigRegistry",
 ]
