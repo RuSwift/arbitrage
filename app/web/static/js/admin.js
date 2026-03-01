@@ -118,21 +118,17 @@
                 self.jobIterations = [];
                 self.iterationsTotal = 0;
                 self.iterationsPage = 1;
-                self.loadIterations();
+                self.loadAllIterations();
             },
-            loadIterations: function () {
+            loadAllIterations: function () {
                 if (!this.selectedJob) return;
                 var self = this;
-                var params = new URLSearchParams({
-                    page: self.iterationsPage,
-                    page_size: self.iterationsPageSize
-                });
-                if (self.statusFilter) params.set('status', self.statusFilter);
+                var params = new URLSearchParams({ page: 1, page_size: 20000 });
                 fetch('/api/admin/crawler/jobs/' + self.selectedJob.id + '/iterations?' + params)
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         self.jobIterations = data.iterations || [];
-                        self.iterationsTotal = data.total || 0;
+                        self.iterationsTotal = self.jobIterations.length;
                     })
                     .catch(function (e) {
                         self.error = e.message || 'Ошибка загрузки итераций';
@@ -217,15 +213,21 @@
             totalPages: function () {
                 return Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
             },
-            iterationsTotalPages: function () {
-                return Math.max(1, Math.ceil(this.iterationsTotal / this.iterationsPageSize));
-            },
             filteredJobIterations: function () {
+                var list = this.jobIterations;
+                var status = (this.statusFilter || '').trim();
+                if (status) list = list.filter(function (it) { return it.status === status; });
                 var q = (this.tokenSearchQuery || '').trim().toLowerCase();
-                if (!q) return this.jobIterations;
-                return this.jobIterations.filter(function (it) {
-                    return (it.token || '').toLowerCase().indexOf(q) !== -1;
-                });
+                if (q) list = list.filter(function (it) { return (it.token || '').toLowerCase().indexOf(q) !== -1; });
+                return list;
+            },
+            iterationsTotalPages: function () {
+                return Math.max(1, Math.ceil(this.filteredJobIterations.length / this.iterationsPageSize));
+            },
+            paginatedJobIterations: function () {
+                var list = this.filteredJobIterations;
+                var start = (this.iterationsPage - 1) * this.iterationsPageSize;
+                return list.slice(start, start + this.iterationsPageSize);
             }
         },
         template:
@@ -290,14 +292,14 @@
             '        <button class="btn btn-sm btn-outline-secondary" @click="closeJobPanel">Закрыть</button>' +
             '      </div>' +
             '      <div class="mb-2 d-flex flex-wrap align-items-center gap-2">' +
-            '        <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1; loadIterations()"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option></select>' +
-            '        <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену" v-model="tokenSearchQuery" />' +
-            '        <span class="text-muted small">Всего: [[ iterationsTotal ]] [[ tokenSearchQuery.trim() ? \'(показано \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
+            '        <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option></select>' +
+            '        <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену" v-model="tokenSearchQuery" @input="iterationsPage=1" />' +
+            '        <span class="text-muted small">Всего: [[ filteredJobIterations.length ]] [[ tokenSearchQuery.trim() || statusFilter ? \'(найдено \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
             '      </div>' +
             '      <div class="table-responsive"><table class="table table-sm">' +
             '        <thead><tr><th>ID</th><th>Токен</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
             '        <tbody>' +
-            '          <tr v-for="it in filteredJobIterations" :key="it.id">' +
+            '          <tr v-for="it in paginatedJobIterations" :key="it.id">' +
             '            <td>[[ it.id ]]</td><td>[[ it.token ]]</td>' +
             '            <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
             '            <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
@@ -310,9 +312,9 @@
             '        </tbody>' +
             '      </table></div>' +
             '      <nav v-if="iterationsTotalPages > 1" class="mt-2"><ul class="pagination pagination-sm">' +
-            '        <li class="page-item" :class="{disabled: iterationsPage <= 1}"><a class="page-link" href="#" @click.prevent="iterationsPage--; loadIterations()">Назад</a></li>' +
+            '        <li class="page-item" :class="{disabled: iterationsPage <= 1}"><a class="page-link" href="#" @click.prevent="iterationsPage--">Назад</a></li>' +
             '        <li class="page-item disabled"><span class="page-link">[[ iterationsPage ]] / [[ iterationsTotalPages ]]</span></li>' +
-            '        <li class="page-item" :class="{disabled: iterationsPage >= iterationsTotalPages}"><a class="page-link" href="#" @click.prevent="iterationsPage++; loadIterations()">Вперёд</a></li>' +
+            '        <li class="page-item" :class="{disabled: iterationsPage >= iterationsTotalPages}"><a class="page-link" href="#" @click.prevent="iterationsPage++">Вперёд</a></li>' +
             '      </ul></nav>' +
             '    </div>' +
             '  </div>' +
@@ -339,6 +341,282 @@
             '  </template>' +
             '</modal-window>' +
             '<!-- Funding detail modal (separate, compact) -->' +
+            '<modal-window v-if="fundingDetailModal.show" width="500px" height="auto">' +
+            '  <template slot="header">' +
+            '    <div class="d-flex justify-content-between align-items-center w-100">' +
+            '      <h6 class="mb-0">[[ fundingDetailModal.title ]] — [[ fundingDetailModal.token ]]</h6>' +
+            '      <button type="button" class="btn-close" @click="closeFundingDetailModal"></button>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="body">' +
+            '    <div v-if="fundingDetailModal.type === \'fr\' && fundingDetailModal.data" class="small">' +
+            '      <p class="mb-1"><strong>Rate:</strong> [[ formatRatioPct(fundingDetailModal.data.rate) ]]</p>' +
+            '      <p class="mb-1"><strong>Next funding (UTC):</strong> [[ formatUtc(fundingDetailModal.data.next_funding_utc) ]]</p>' +
+            '      <p class="mb-1" v-if="fundingDetailModal.data.next_rate != null"><strong>Next rate:</strong> [[ formatRatioPct(fundingDetailModal.data.next_rate) ]]</p>' +
+            '      <p class="mb-1" v-if="fundingDetailModal.data.index_price != null"><strong>Index price:</strong> [[ fundingDetailModal.data.index_price ]]</p>' +
+            '      <p class="mb-0" v-if="fundingDetailModal.data.utc != null"><strong>UTC:</strong> [[ formatUtc(fundingDetailModal.data.utc) ]]</p>' +
+            '    </div>' +
+            '    <div v-else-if="fundingDetailModal.type === \'next\' && fundingDetailModal.data" class="small">' +
+            '      <p class="mb-1"><strong>Next funding (UTC):</strong> [[ formatUtc(fundingDetailModal.data.next_funding_utc) ]]</p>' +
+            '      <p class="mb-0" v-if="fundingDetailModal.data.next_rate != null"><strong>Next rate:</strong> [[ formatRatioPct(fundingDetailModal.data.next_rate) ]]</p>' +
+            '    </div>' +
+            '    <div v-else-if="fundingDetailModal.type === \'hist\' && fundingDetailModal.data && fundingDetailModal.data.length" class="small">' +
+            '      <div class="table-responsive" style="max-height:280px; overflow:auto">' +
+            '        <table class="table table-sm">' +
+            '          <thead><tr><th>Время (UTC)</th><th>Rate %</th></tr></thead>' +
+            '          <tbody>' +
+            '            <tr v-for="(row, i) in fundingDetailModal.data" :key="i">' +
+            '              <td>[[ formatUtc(row.funding_time_utc) ]]</td><td>[[ formatRatioPct(row.rate) ]]</td>' +
+            '            </tr>' +
+            '          </tbody>' +
+            '        </table>' +
+            '      </div>' +
+            '    </div>' +
+            '    <div v-else class="text-muted small">Нет данных</div>' +
+            '  </template>' +
+            '  <template slot="footer">' +
+            '    <button class="btn btn-secondary btn-sm" @click="closeFundingDetailModal">Закрыть</button>' +
+            '  </template>' +
+            '</modal-window>' +
+            '</div>'
+    });
+
+    // --- Crawler2: вкладки по Job, статистика Job, таблица итераций как в Crawler ---
+    Vue.component('crawler2-admin', {
+        delimiters: ['[[', ']]'],
+        data: function () {
+            return {
+                loading: true,
+                error: null,
+                jobs: [],
+                selectedJob: null,
+                jobStats: null,
+                jobIterations: [],
+                iterationsPage: 1,
+                iterationsPageSize: 50,
+                statusFilter: '',
+                tokenSearchQuery: '',
+                selectedIteration: null,
+                showIterationModal: false,
+                loadingIterationDetail: false,
+                selectedVolumeCandleIndex: null,
+                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null }
+            };
+        },
+        mounted: function () {
+            this.loadJobs();
+        },
+        methods: {
+            loadJobs: function () {
+                var self = this;
+                self.loading = true;
+                self.error = null;
+                fetch('/api/admin/crawler/jobs?page=1&page_size=100')
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.jobs = data.jobs || [];
+                        if (self.jobs.length && !self.selectedJob) {
+                            self.selectJob(self.jobs[0]);
+                        } else if (self.selectedJob && !self.jobs.find(function (j) { return j.id === self.selectedJob.id; })) {
+                            self.selectedJob = self.jobs[0] || null;
+                            self.jobStats = null;
+                            if (self.selectedJob) { self.loadJobStats(); self.loadAllIterations(); }
+                        }
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки заданий';
+                    })
+                    .finally(function () { self.loading = false; });
+            },
+            selectJob: function (job) {
+                this.selectedJob = job;
+                this.jobStats = null;
+                this.jobIterations = [];
+                this.iterationsPage = 1;
+                this.loadJobStats();
+                this.loadAllIterations();
+            },
+            loadJobStats: function () {
+                if (!this.selectedJob) return;
+                var self = this;
+                fetch('/api/admin/crawler/jobs/' + this.selectedJob.id + '/stats')
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.jobStats = data;
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки статистики job';
+                    });
+            },
+            loadAllIterations: function () {
+                if (!this.selectedJob) return;
+                var self = this;
+                var params = new URLSearchParams({ page: 1, page_size: 20000 });
+                fetch('/api/admin/crawler/jobs/' + this.selectedJob.id + '/iterations?' + params)
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.jobIterations = data.iterations || [];
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки итераций';
+                    });
+            },
+            showIteration: function (it) {
+                var self = this;
+                self.selectedIteration = null;
+                self.showIterationModal = true;
+                self.loadingIterationDetail = true;
+                fetch('/api/admin/crawler/iterations/' + it.id)
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.selectedIteration = data;
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки итерации';
+                    })
+                    .finally(function () { self.loadingIterationDetail = false; });
+            },
+            showFundingDetail: function (it, type) {
+                var title = type === 'fr' ? 'Funding rate' : type === 'next' ? 'Next funding rate' : 'Funding rate history';
+                var data = type === 'fr' ? it.funding_rate : type === 'next' ? it.next_funding_rate : (it.funding_rate_history || null);
+                if (!data && type === 'hist') data = [];
+                this.fundingDetailModal = { show: true, title: title, token: it.token || '', type: type, data: data };
+            },
+            closeFundingDetailModal: function () {
+                this.fundingDetailModal = { show: false, title: '', token: '', type: '', data: null };
+            },
+            formatUtc: function (utc) {
+                if (utc == null) return '—';
+                var t = Number(utc);
+                if (t < 1e12) t *= 1000;
+                var d = new Date(t);
+                if (isNaN(d.getTime())) return '—';
+                return d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+            },
+            formatRatioPct: function (ratio) {
+                if (ratio == null) return '—';
+                var n = Number(ratio);
+                if (isNaN(n)) return '—';
+                return (n * 100).toFixed(4) + '%';
+            },
+            formatDate: function (s) {
+                if (!s) return '—';
+                try {
+                    var d = new Date(s);
+                    return d.toLocaleString('ru-RU');
+                } catch (e) { return s; }
+            },
+            closeIterationModal: function () {
+                this.showIterationModal = false;
+                this.selectedIteration = null;
+                this.selectedVolumeCandleIndex = null;
+            },
+            onKlinesVolumeBarClick: function (originalIdx) {
+                this.selectedVolumeCandleIndex = this.selectedVolumeCandleIndex === originalIdx ? null : originalIdx;
+            }
+        },
+        computed: {
+            filteredJobIterations: function () {
+                var list = this.jobIterations;
+                var status = (this.statusFilter || '').trim();
+                if (status) list = list.filter(function (it) { return it.status === status; });
+                var q = (this.tokenSearchQuery || '').trim().toLowerCase();
+                if (q) list = list.filter(function (it) {
+                    return (it.token || '').toLowerCase().indexOf(q) !== -1 ||
+                        (it.symbol || '').toLowerCase().indexOf(q) !== -1;
+                });
+                return list;
+            },
+            iterationsTotalPages: function () {
+                return Math.max(1, Math.ceil(this.filteredJobIterations.length / this.iterationsPageSize));
+            },
+            paginatedJobIterations: function () {
+                var list = this.filteredJobIterations;
+                var start = (this.iterationsPage - 1) * this.iterationsPageSize;
+                return list.slice(start, start + this.iterationsPageSize);
+            }
+        },
+        template:
+            '<div>' +
+            '<div class="card">' +
+            '  <div class="card-header d-flex justify-content-between align-items-center">' +
+            '    <h5 class="mb-0"><i class="bi bi-collection me-2"></i>Crawler: задания (вкладки) и итерации</h5>' +
+            '    <button class="btn btn-sm btn-outline-primary" @click="loadJobs"><i class="bi bi-arrow-clockwise"></i> Обновить</button>' +
+            '  </div>' +
+            '  <div class="card-body">' +
+            '    <div v-if="error" class="alert alert-danger">[[ error ]]</div>' +
+            '    <div v-if="loading" class="text-center py-4"><div class="spinner-border text-primary"></div></div>' +
+            '    <template v-else>' +
+            '      <ul class="nav nav-tabs mb-3">' +
+            '        <li class="nav-item" v-for="j in jobs" :key="j.id">' +
+            '          <a class="nav-link" href="#" :class="{ active: selectedJob && selectedJob.id === j.id }" @click.prevent="selectJob(j)">' +
+            '            [[ j.exchange ]] [[ j.kind || j.connector ]] #[[ j.id ]]' +
+            '          </a>' +
+            '        </li>' +
+            '      </ul>' +
+            '      <div v-if="selectedJob && jobStats" class="mb-4">' +
+            '        <div class="row g-2 mb-2">' +
+            '          <div class="col-auto"><span class="text-muted">Старт:</span> [[ formatDate(jobStats.start) ]]</div>' +
+            '          <div class="col-auto"><span class="text-muted">Стоп:</span> [[ formatDate(jobStats.stop) ]]</div>' +
+            '          <div class="col-auto"><span class="text-muted">Итераций:</span> [[ jobStats.iterations_count != null ? jobStats.iterations_count : \'—\' ]]</div>' +
+            '        </div>' +
+            '        <div class="mb-2" v-if="jobStats.by_status && jobStats.by_status.length">' +
+            '          <span class="text-muted me-2">По статусу:</span>' +
+            '          <span v-for="s in jobStats.by_status" :key="s.status" class="badge me-1" :class="s.status === \'success\' ? \'bg-success\' : s.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ s.status ]] [[ s.count ]]</span>' +
+            '        </div>' +
+            '        <div v-if="jobStats.error" class="alert alert-danger py-2 mb-0">[[ jobStats.error ]]</div>' +
+            '      </div>' +
+            '      <div v-if="selectedJob" class="mt-3">' +
+            '        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
+            '          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option></select>' +
+            '          <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену/символу" v-model="tokenSearchQuery" @input="iterationsPage=1" />' +
+            '          <span class="text-muted small">Всего: [[ filteredJobIterations.length ]] [[ tokenSearchQuery.trim() || statusFilter ? \'(найдено \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
+            '        </div>' +
+            '        <div class="table-responsive"><table class="table table-sm">' +
+            '          <thead><tr><th>ID</th><th>Токен</th><th>Символ</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>comment</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
+            '          <tbody>' +
+            '            <tr v-for="it in paginatedJobIterations" :key="it.id">' +
+            '              <td>[[ it.id ]]</td><td>[[ it.token ]]</td><td>[[ it.symbol || \'—\' ]]</td>' +
+            '              <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
+            '              <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
+            '              <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
+            '              <td><span class="small text-muted" :title="it.comment" style="max-width:120px; display:inline-block; overflow:hidden; text-overflow:ellipsis">[[ it.comment || \'—\' ]]</span></td>' +
+            '              <td><a href="#" v-if="it.funding_rate" @click.prevent="showFundingDetail(it, \'fr\')" class="small" :title="formatRatioPct(it.funding_rate.rate)">[[ formatRatioPct(it.funding_rate.rate) ]]</a><span v-else>—</span></td>' +
+            '              <td><a href="#" v-if="it.next_funding_rate" @click.prevent="showFundingDetail(it, \'next\')" class="small">[[ it.next_funding_rate.next_funding_utc != null ? formatUtc(it.next_funding_rate.next_funding_utc) : (it.next_funding_rate.next_rate != null ? formatRatioPct(it.next_funding_rate.next_rate) : \'…\') ]]</a><span v-else>—</span></td>' +
+            '              <td><a href="#" v-if="it.funding_rate_history && it.funding_rate_history.length" @click.prevent="showFundingDetail(it, \'hist\')" class="small">[[ it.funding_rate_history.length ]]</a><span v-else>—</span></td>' +
+            '              <td><button class="btn btn-sm btn-outline-primary" @click.stop="showIteration(it)">Детали</button></td>' +
+            '            </tr>' +
+            '          </tbody>' +
+            '        </table></div>' +
+            '        <nav v-if="iterationsTotalPages > 1" class="mt-2"><ul class="pagination pagination-sm">' +
+            '          <li class="page-item" :class="{disabled: iterationsPage <= 1}"><a class="page-link" href="#" @click.prevent="iterationsPage--">Назад</a></li>' +
+            '          <li class="page-item disabled"><span class="page-link">[[ iterationsPage ]] / [[ iterationsTotalPages ]]</span></li>' +
+            '          <li class="page-item" :class="{disabled: iterationsPage >= iterationsTotalPages}"><a class="page-link" href="#" @click.prevent="iterationsPage++">Вперёд</a></li>' +
+            '        </ul></nav>' +
+            '      </div>' +
+            '    </template>' +
+            '  </div>' +
+            '</div>' +
+            '<modal-window v-if="showIterationModal" width="90%" height="90%">' +
+            '  <template slot="header">' +
+            '    <div class="d-flex justify-content-between align-items-center w-100">' +
+            '      <h6 class="mb-0">Итерация #[[ selectedIteration ? selectedIteration.id : \'\' ]] — [[ selectedIteration ? selectedIteration.token : \'\' ]]</h6>' +
+            '      <button type="button" class="btn-close" @click="closeIterationModal"></button>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="body">' +
+            '    <div v-if="loadingIterationDetail" class="text-center py-5"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0">Загрузка...</p></div>' +
+            '    <div v-else-if="selectedIteration" class="iteration-detail-body">' +
+            '      <p class="mb-2"><strong>Статус:</strong> [[ selectedIteration.status ]] <strong>done:</strong> [[ selectedIteration.done ]] &nbsp; <strong>Старт:</strong> [[ formatDate(selectedIteration.start) ]] <strong>Стоп:</strong> [[ formatDate(selectedIteration.stop) ]]</p>' +
+            '      <p v-if="selectedIteration.error" class="mb-2"><strong>Ошибка:</strong> <span class="text-danger">[[ selectedIteration.error ]]</span></p>' +
+            '      <book-depth :book-depth="selectedIteration.book_depth" :token="selectedIteration.token"></book-depth>' +
+            '      <klines-chart :klines="selectedIteration.klines" :token="selectedIteration.token" :symbol="(selectedIteration.book_depth && selectedIteration.book_depth.symbol) || \'\'" :selected-volume-candle-index="selectedVolumeCandleIndex" @volume-bar-click="onKlinesVolumeBarClick"></klines-chart>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="footer">' +
+            '    <button class="btn btn-secondary btn-sm" @click="closeIterationModal">Закрыть</button>' +
+            '  </template>' +
+            '</modal-window>' +
             '<modal-window v-if="fundingDetailModal.show" width="500px" height="auto">' +
             '  <template slot="header">' +
             '    <div class="d-flex justify-content-between align-items-center w-100">' +
@@ -678,6 +956,12 @@
     Vue.component('Crawler', {
         delimiters: ['[[', ']]'],
         template: '<div class="container-fluid"><crawler-admin></crawler-admin></div>'
+    });
+
+    // Страница «Crawler2»: вкладки по Job, статистика, таблица итераций
+    Vue.component('Crawler2', {
+        delimiters: ['[[', ']]'],
+        template: '<div class="container-fluid"><crawler2-admin></crawler2-admin></div>'
     });
 
     return Vue;

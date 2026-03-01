@@ -36,7 +36,7 @@ def create_app():
                     "icon_class": "bi bi-diagram-3",
                     "label": "Crawler",
                     "sub": [],
-                    "page": "Crawler",
+                    "page": "Crawler2",
                 },
                 {
                     "id": "tokens",
@@ -74,24 +74,7 @@ def create_app():
                 "app_name": "Arbitrage",
                 "side_menu": _SIDE_MENU,
                 "selected_menu": "crawler",
-                "current_page": "Crawler",
-                "user_login": user.sub,
-            },
-        )
-
-    @app.get("/admin/tokens", response_class=HTMLResponse)
-    async def admin_tokens_page(request: Request):
-        user = await get_current_admin_from_request(request)
-        if not user:
-            return RedirectResponse(url="/login", status_code=302)
-        return templates.TemplateResponse(
-            "admin.html",
-            {
-                "request": request,
-                "app_name": "Arbitrage",
-                "side_menu": _SIDE_MENU,
-                "selected_menu": "tokens",
-                "current_page": "Tokens",
+                "current_page": "Crawler2",
                 "user_login": user.sub,
             },
         )

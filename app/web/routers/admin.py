@@ -26,6 +26,7 @@ def _job_to_dict(job: CrawlerJob, iterations_count: int | None = None) -> dict[s
         "id": job.id,
         "exchange": job.exchange,
         "connector": job.connector,
+        "kind": getattr(job, "kind", None) or job.connector,
         "start": _serialize_dt(job.start),
         "stop": _serialize_dt(job.stop),
         "error": job.error,
@@ -40,6 +41,7 @@ def _iteration_to_dict(it: CrawlerIteration) -> dict[str, Any]:
         "id": it.id,
         "crawler_job_id": it.crawler_job_id,
         "token": it.token,
+        "symbol": it.symbol,
         "start": _serialize_dt(it.start),
         "stop": _serialize_dt(it.stop),
         "done": it.done,
@@ -118,12 +120,37 @@ async def get_crawler_job(
     return _job_to_dict(job, iterations_count=count)
 
 
+@router.get("/crawler/jobs/{job_id}/stats")
+async def get_crawler_job_stats(
+    job_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Job detail + iteration counts by status (for Crawler2 tab)."""
+    result = await db.execute(select(CrawlerJob).where(CrawlerJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="CrawlerJob not found")
+    count_result = await db.execute(
+        select(func.count(CrawlerIteration.id)).where(CrawlerIteration.crawler_job_id == job_id)
+    )
+    total = count_result.scalar() or 0
+    by_status_result = await db.execute(
+        select(CrawlerIteration.status, func.count(CrawlerIteration.id))
+        .where(CrawlerIteration.crawler_job_id == job_id)
+        .group_by(CrawlerIteration.status)
+    )
+    by_status = [{"status": row[0], "count": row[1]} for row in by_status_result.all()]
+    out = _job_to_dict(job, iterations_count=total)
+    out["by_status"] = by_status
+    return out
+
+
 @router.get("/crawler/jobs/{job_id}/iterations")
 async def list_job_iterations(
     job_id: int,
     db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(5000, ge=1, le=20000),
     status: str | None = Query(None),
 ):
     """List CrawlerIteration for a job with optional status filter."""
