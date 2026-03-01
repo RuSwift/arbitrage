@@ -54,13 +54,20 @@ def async_database_url():
 
 @pytest.fixture
 def db_session(database_url):
-    """Sync DB session for orchestrator tests. Rollback on teardown."""
+    """Sync DB session for orchestrator tests. Очистка snapshot-таблиц в начале, rollback на teardown."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    from app.db.models import BookDepthSnapshot, CandleStickSnapshot, CurrencyPairSnapshot
+
     engine = create_engine(database_url)
     factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = factory()
     try:
+        session.query(CandleStickSnapshot).delete()
+        session.query(BookDepthSnapshot).delete()
+        session.query(CurrencyPairSnapshot).delete()
+        session.commit()
         yield session
     finally:
         session.rollback()
@@ -69,8 +76,12 @@ def db_session(database_url):
 
 @pytest_asyncio.fixture
 async def async_db_session(async_database_url):
-    """Async DB session for orchestrator tests. Rollback on teardown."""
+    """Async DB session for orchestrator tests. Очистка snapshot-таблиц в начале, rollback на teardown."""
+    from sqlalchemy import delete
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+    from app.db.models import BookDepthSnapshot, CandleStickSnapshot, CurrencyPairSnapshot
+
     engine = create_async_engine(async_database_url)
     factory = async_sessionmaker(
         bind=engine,
@@ -80,6 +91,10 @@ async def async_db_session(async_database_url):
     )
     async with factory() as session:
         try:
+            await session.execute(delete(CandleStickSnapshot))
+            await session.execute(delete(BookDepthSnapshot))
+            await session.execute(delete(CurrencyPairSnapshot))
+            await session.commit()
             yield session
         finally:
             await session.rollback()

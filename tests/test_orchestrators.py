@@ -442,13 +442,6 @@ class TestSpotOrchestratorImplCandlestick:
     def test_get_klines_from_db_when_redis_has_less_than_limit(self, db_session, redis_client):
         """Если в Redis меньше свечей чем limit — дозапрос из БД, merge, сортировка (свежие первые)."""
         symbol = TEST_SYMBOL_KLINES_DB
-        db_session.query(CandleStickSnapshot).filter_by(
-            exchange_id=TEST_EXCHANGE,
-            kind="spot",
-            symbol=symbol,
-            align_to_minutes=1,
-        ).delete()
-        db_session.commit()
         row1 = CandleStickSnapshot(
             exchange_id=TEST_EXCHANGE,
             kind="spot",
