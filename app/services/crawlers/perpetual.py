@@ -158,6 +158,7 @@ class CEXPerpetualCrawler(BaseService):
                     if it.status != "success":
                         it.status = "pending"
                     it.start = now
+                    it.stop = None
                     it.comment = None
                 publisher = PerpetualOrchestratorImpl(
                     db_session=db,
