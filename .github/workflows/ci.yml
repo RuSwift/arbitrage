@@ -88,3 +88,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose down -v
+
+      - name: Build Docker image
+        run: docker build -t arbitrage .

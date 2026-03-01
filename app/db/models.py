@@ -81,7 +81,7 @@ class CrawlerIteration(Base):
     start = Column(DateTime(timezone=True), nullable=False)
     stop = Column(DateTime(timezone=True), nullable=True)
     done = Column(Boolean, default=False, nullable=False)
-    status = Column(String, nullable=False)  # init | pending | success | error | ignore
+    status = Column(String, nullable=False)  # init | pending | success | error | ignore | inactive
     comment = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     last_update = Column(DateTime(timezone=True), nullable=False)

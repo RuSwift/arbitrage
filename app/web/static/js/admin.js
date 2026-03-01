@@ -263,7 +263,7 @@
             '      <div class="col-md-4">' +
             '        <div class="card border-secondary"><div class="card-body py-2">' +
             '          <div class="text-muted small">По статусу итераций</div>' +
-            '          <span v-for="s in (stats.by_status || [])" :key="s.status" class="badge me-1" :class="s.status === \'success\' ? \'bg-success\' : s.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ s.status ]] [[ s.count ]]</span>' +
+            '          <span v-for="s in (stats.by_status || [])" :key="s.status" class="badge me-1" :class="s.status === \'success\' ? \'bg-success\' : s.status === \'error\' ? \'bg-danger\' : s.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ s.status ]] [[ s.count ]]</span>' +
             '        </div></div>' +
             '      </div>' +
             '    </div>' +
@@ -303,7 +303,7 @@
             '        <button class="btn btn-sm btn-outline-secondary" @click="closeJobPanel">Закрыть</button>' +
             '      </div>' +
             '      <div class="mb-2 d-flex flex-wrap align-items-center gap-2">' +
-            '        <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option></select>' +
+            '        <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option><option value="inactive">inactive</option></select>' +
             '        <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену" v-model="tokenSearchQuery" @input="iterationsPage=1" />' +
             '        <label class="d-inline-flex align-items-center gap-1 mb-0"><input type="checkbox" v-model="hideIgnoreRecords" @change="iterationsPage=1" /> Игнорировать ignore записи</label>' +
             '        <span class="text-muted small">Всего: [[ filteredJobIterations.length ]] [[ tokenSearchQuery.trim() || statusFilter || hideIgnoreRecords ? \'(найдено \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
@@ -317,7 +317,7 @@
             '          <tr v-for="it in paginatedJobIterations" :key="it.id">' +
             '            <td>[[ it.id ]]</td><td>[[ it.token ]]</td>' +
             '            <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
-            '            <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
+            '            <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : it.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
             '            <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
             '            <td>[[ it.currency_pair && it.currency_pair.ratio != null ? formatOrderPrice(it.currency_pair.ratio) : \'—\' ]]</td>' +
             '            <td><a href="#" v-if="it.funding_rate" @click.prevent="showFundingDetail(it, \'fr\')" class="small" :title="formatRatioPct(it.funding_rate.rate)">[[ formatRatioPct(it.funding_rate.rate) ]]</a><span v-else>—</span></td>' +
@@ -594,13 +594,13 @@
             '        </div>' +
             '        <div class="mb-2" v-if="jobStats.by_status && jobStats.by_status.length">' +
             '          <span class="text-muted me-2">По статусу:</span>' +
-            '          <span v-for="s in jobStats.by_status" :key="s.status" class="badge me-1" :class="s.status === \'success\' ? \'bg-success\' : s.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ s.status ]] [[ s.count ]]</span>' +
+            '          <span v-for="s in jobStats.by_status" :key="s.status" class="badge me-1" :class="s.status === \'success\' ? \'bg-success\' : s.status === \'error\' ? \'bg-danger\' : s.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ s.status ]] [[ s.count ]]</span>' +
             '        </div>' +
             '        <div v-if="jobStats.error" class="alert alert-danger py-2 mb-0">[[ jobStats.error ]]</div>' +
             '      </div>' +
             '      <div v-if="selectedJob" class="mt-3">' +
             '        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
-            '          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option></select>' +
+            '          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option><option value="inactive">inactive</option></select>' +
             '          <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену/символу" v-model="tokenSearchQuery" @input="iterationsPage=1" />' +
             '          <label class="d-inline-flex align-items-center gap-1 mb-0"><input type="checkbox" v-model="hideIgnoreRecords" @change="iterationsPage=1" /> Игнорировать ignore записи</label>' +
             '          <span class="text-muted small">Всего: [[ filteredJobIterations.length ]] [[ tokenSearchQuery.trim() || statusFilter || hideIgnoreRecords ? \'(найдено \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
@@ -609,12 +609,13 @@
             '        <div v-if="loadingIterations" class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0 text-muted small">Загрузка итераций...</p></div>' +
             '        <template v-else>' +
             '        <div class="table-responsive"><table class="table table-sm">' +
-            '          <thead><tr><th>ID</th><th>Токен</th><th>Символ</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>comment</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
+            '          <thead><tr><th>ID</th><th>Токен</th><th>Символ</th><th>Старт</th><th>Стоп</th><th>Неактивна до</th><th>Статус</th><th>done</th><th>comment</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
             '          <tbody>' +
             '            <tr v-for="it in paginatedJobIterations" :key="it.id">' +
             '              <td>[[ it.id ]]</td><td>[[ it.token ]]</td><td>[[ it.symbol || \'—\' ]]</td>' +
             '              <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
-            '              <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
+            '              <td>[[ it.inactive_till_timestamp ? formatDate(it.inactive_till_timestamp) : \'—\' ]]</td>' +
+            '              <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : it.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
             '              <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
             '              <td><span class="small text-muted" :title="it.comment" style="max-width:120px; display:inline-block; overflow:hidden; text-overflow:ellipsis">[[ it.comment || \'—\' ]]</span></td>' +
             '              <td>[[ it.currency_pair && it.currency_pair.ratio != null ? formatPrice(it.currency_pair.ratio) : \'—\' ]]</td>' +

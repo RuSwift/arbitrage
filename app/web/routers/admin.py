@@ -49,6 +49,7 @@ def _iteration_to_dict(it: CrawlerIteration) -> dict[str, Any]:
         "comment": it.comment,
         "error": it.error,
         "last_update": _serialize_dt(it.last_update),
+        "inactive_till_timestamp": _serialize_dt(it.inactive_till_timestamp),
         "currency_pair": it.currency_pair,
         "book_depth": it.book_depth,
         "klines": it.klines,
