@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
+
+logger = logging.getLogger(__name__)
 
 from app.settings import Settings
 
@@ -76,9 +79,13 @@ def revoke_jti(jti: str, ttl_seconds: int) -> None:
 
 
 async def is_revoked_async(redis: Any, jti: str) -> bool:
-    """Проверить, отозван ли токен по jti (async Redis client)."""
+    """Проверить, отозван ли токен по jti (async Redis client). При ошибке Redis логирует и пробрасывает исключение."""
     key = f"{REVOKED_KEY_PREFIX}{jti}"
-    return (await redis.get(key)) is not None
+    try:
+        return (await redis.get(key)) is not None
+    except Exception as e:
+        logger.warning("Redis check revocation failed (jti=%s): %s", jti, e)
+        raise
 
 
 async def revoke_jti_async(redis: Any, jti: str, ttl_seconds: int) -> None:

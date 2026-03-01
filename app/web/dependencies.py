@@ -120,6 +120,12 @@ def get_async_redis():
     return _async_redis_client
 
 
+def reset_async_redis() -> None:
+    """Сбросить глобальный async Redis-клиент (при ошибке соединения следующий запрос создаст новый)."""
+    global _async_redis_client
+    _async_redis_client = None
+
+
 # --- Current User / Admin (JWT + BasicAuth) ---
 
 security_bearer = HTTPBearer(auto_error=False)
@@ -257,8 +263,17 @@ async def get_current_admin_from_request(request: Request) -> CurrentUser | None
     jti = payload.get("jti")
     if jti:
         redis = get_async_redis()
-        if await is_revoked_async(redis, jti):
-            return None
+        try:
+            if await is_revoked_async(redis, jti):
+                return None
+        except Exception:
+            reset_async_redis()
+            return CurrentUser(
+                sub=payload["sub"],
+                role=payload["role"],
+                exp=payload.get("exp"),
+                jti=jti,
+            )
     return CurrentUser(
         sub=payload["sub"],
         role=payload["role"],
