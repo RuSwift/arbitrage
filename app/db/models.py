@@ -49,6 +49,7 @@ class CrawlerJob(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     exchange = Column(String, nullable=False)  # binance | bybit | okx | ...
     connector = Column(String, nullable=False)  # spot | perpetual
+    kind = Column(String, nullable=False)  # spot | perpetual
     start = Column(DateTime(timezone=True), nullable=False)
     stop = Column(DateTime(timezone=True), nullable=True)
     error = Column(Text, nullable=True)
