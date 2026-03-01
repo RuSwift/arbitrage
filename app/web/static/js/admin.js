@@ -965,6 +965,17 @@
                         self.error = e.message || 'Ошибка изменения статуса';
                     })
                     .finally(function () { self.togglingId = null; });
+            },
+            goToPage: function (delta) {
+                var page = this.page + delta;
+                if (page < 1 || page > this.tokensTotalPages) return;
+                this.page = page;
+                this.loadTokens();
+            }
+        },
+        computed: {
+            tokensTotalPages: function () {
+                return Math.max(1, Math.ceil(this.total / this.pageSize));
             }
         },
         template:
@@ -1024,7 +1035,12 @@
             '          </tbody>' +
             '        </table>' +
             '      </div>' +
-            '      <div v-if="total > pageSize" class="mt-2 small text-muted">Показано [[ tokens.length ]] из [[ total ]]</div>' +
+            '      <nav v-if="tokensTotalPages > 1" class="mt-2"><ul class="pagination pagination-sm">' +
+            '        <li class="page-item" :class="{disabled: page <= 1}"><a class="page-link" href="#" @click.prevent="goToPage(-1)">Назад</a></li>' +
+            '        <li class="page-item disabled"><span class="page-link">[[ page ]] / [[ tokensTotalPages ]]</span></li>' +
+            '        <li class="page-item" :class="{disabled: page >= tokensTotalPages}"><a class="page-link" href="#" @click.prevent="goToPage(1)">Вперёд</a></li>' +
+            '      </ul></nav>' +
+            '      <div v-if="!loading && total > 0" class="mt-1 small text-muted">Всего: [[ total ]]</div>' +
             '    </div>' +
             '  </div>' +
             '  <!-- Form modal -->' +
