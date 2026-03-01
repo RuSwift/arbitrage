@@ -331,7 +331,7 @@ class CEXPerpetualCrawler(BaseService):
         if rate_pct < config.funding_min_abs_rate_percents:
             it.inactive_till_timestamp = inactive_until_funding
             it.status = "inactive"
-            it.comment = "funding rate below minimum absolute threshold"
+            it.comment = f"funding rate {rate_pct}% below minimum absolute threshold"
             it.last_update = now_utc
             db.flush()
             return
