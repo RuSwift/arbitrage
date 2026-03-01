@@ -35,6 +35,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Remove .env to avoid overriding CI env
+        run: rm -f .env
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -60,6 +63,7 @@ jobs:
 
       - name: Start PostgreSQL and Redis
         run: |
+          export REDIS_PASSWORD=arbitrage-redis-dev
           docker compose up -d postgres redis
           sleep 5
 
