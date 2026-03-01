@@ -164,3 +164,21 @@ class CandleStickSnapshot(Base):
     utc = Column(Float, nullable=True)  # реальное время события (Publisher обновляет из события)
     align_to_minutes = Column(Integer, nullable=False)
     aligned_timestamp = Column(Float, nullable=False)  # выровненный utc для поиска/обновления
+
+
+# ---------------------------------------------------------------------------
+# Service configuration
+# ---------------------------------------------------------------------------
+
+
+class ServiceConfig(Base):
+    """Конфигурация сервиса. Одна запись на service_name."""
+
+    __tablename__ = "service_config"
+    __table_args__ = (UniqueConstraint("service_name", name="uq_service_config_service_name"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    service_name = Column(String, nullable=False)
+    config = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=text("now()"))

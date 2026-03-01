@@ -41,6 +41,7 @@ from app.db.models import (  # noqa: F401
     CrawlerIteration,
     CrawlerJob,
     CurrencyPairSnapshot,
+    ServiceConfig,
     Token,
 )
 
