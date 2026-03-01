@@ -431,6 +431,7 @@
                 selectedJob: null,
                 jobStats: null,
                 jobIterations: [],
+                iterationsTotal: 0,
                 loadingIterations: false,
                 iterationsPage: 1,
                 iterationsPageSize: 50,
@@ -442,7 +443,8 @@
                 loadingIterationDetail: false,
                 selectedVolumeCandleIndex: null,
                 fundingDetailModal: { show: false, title: '', token: '', type: '', data: null },
-                errorModal: { show: false, text: '' }
+                errorModal: { show: false, text: '' },
+                _tokenSearchTimeout: null
             };
         },
         mounted: function () {
@@ -462,7 +464,7 @@
                         } else if (self.selectedJob && !self.jobs.find(function (j) { return j.id === self.selectedJob.id; })) {
                             self.selectedJob = self.jobs[0] || null;
                             self.jobStats = null;
-                            if (self.selectedJob) { self.loadJobStats(); self.loadAllIterations(); }
+                            if (self.selectedJob) { self.loadJobStats(); self.loadIterations(); }
                         }
                     })
                     .catch(function (e) {
@@ -474,9 +476,10 @@
                 this.selectedJob = job;
                 this.jobStats = null;
                 this.jobIterations = [];
+                this.iterationsTotal = 0;
                 this.iterationsPage = 1;
                 this.loadJobStats();
-                this.loadAllIterations();
+                this.loadIterations();
             },
             loadJobStats: function () {
                 if (!this.selectedJob) return;
@@ -490,20 +493,46 @@
                         self.error = e.message || 'Ошибка загрузки статистики job';
                     });
             },
-            loadAllIterations: function () {
+            loadIterations: function () {
                 if (!this.selectedJob) return;
                 var self = this;
                 self.loadingIterations = true;
-                var params = new URLSearchParams({ page: 1, page_size: 20000 });
-                fetch('/api/admin/crawler/jobs/' + this.selectedJob.id + '/iterations?' + params)
+                var params = new URLSearchParams({
+                    page: self.iterationsPage,
+                    page_size: self.iterationsPageSize
+                });
+                if (self.statusFilter) params.set('status', self.statusFilter);
+                if ((self.tokenSearchQuery || '').trim()) params.set('token', self.tokenSearchQuery.trim());
+                if (self.hideIgnoreRecords) params.set('hide_ignore', 'true');
+                fetch('/api/admin/crawler/jobs/' + self.selectedJob.id + '/iterations?' + params)
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         self.jobIterations = data.iterations || [];
+                        self.iterationsTotal = data.total != null ? data.total : 0;
                     })
                     .catch(function (e) {
                         self.error = e.message || 'Ошибка загрузки итераций';
                     })
                     .finally(function () { self.loadingIterations = false; });
+            },
+            onFilterChange: function () {
+                this.iterationsPage = 1;
+                this.loadIterations();
+            },
+            onTokenSearchInput: function () {
+                var self = this;
+                if (self._tokenSearchTimeout) clearTimeout(self._tokenSearchTimeout);
+                self._tokenSearchTimeout = setTimeout(function () {
+                    self._tokenSearchTimeout = null;
+                    self.iterationsPage = 1;
+                    self.loadIterations();
+                }, 400);
+            },
+            goToIterationsPage: function (delta) {
+                var page = this.iterationsPage + delta;
+                if (page < 1 || page > this.iterationsTotalPages) return;
+                this.iterationsPage = page;
+                this.loadIterations();
             },
             showIteration: function (it) {
                 var self = this;
@@ -570,31 +599,18 @@
                 this.tokenSearchQuery = '';
                 this.hideIgnoreRecords = false;
                 this.iterationsPage = 1;
+                this.loadIterations();
             },
             onKlinesVolumeBarClick: function (originalIdx) {
                 this.selectedVolumeCandleIndex = this.selectedVolumeCandleIndex === originalIdx ? null : originalIdx;
             }
         },
         computed: {
-            filteredJobIterations: function () {
-                var list = this.jobIterations;
-                var status = (this.statusFilter || '').trim();
-                if (status) list = list.filter(function (it) { return it.status === status; });
-                if (this.hideIgnoreRecords) list = list.filter(function (it) { return it.status !== 'ignore'; });
-                var q = (this.tokenSearchQuery || '').trim().toLowerCase();
-                if (q) list = list.filter(function (it) {
-                    return (it.token || '').toLowerCase().indexOf(q) !== -1 ||
-                        (it.symbol || '').toLowerCase().indexOf(q) !== -1;
-                });
-                return list;
-            },
             iterationsTotalPages: function () {
-                return Math.max(1, Math.ceil(this.filteredJobIterations.length / this.iterationsPageSize));
+                return Math.max(1, Math.ceil(this.iterationsTotal / this.iterationsPageSize));
             },
             paginatedJobIterations: function () {
-                var list = this.filteredJobIterations;
-                var start = (this.iterationsPage - 1) * this.iterationsPageSize;
-                return list.slice(start, start + this.iterationsPageSize);
+                return this.jobIterations;
             }
         },
         template:
@@ -629,10 +645,10 @@
             '      </div>' +
             '      <div v-if="selectedJob" class="mt-3">' +
             '        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
-            '          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="iterationsPage=1"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option><option value="inactive">inactive</option></select>' +
-            '          <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену/символу" v-model="tokenSearchQuery" @input="iterationsPage=1" />' +
-            '          <label class="d-inline-flex align-items-center gap-1 mb-0"><input type="checkbox" v-model="hideIgnoreRecords" @change="iterationsPage=1" /> Игнорировать ignore записи</label>' +
-            '          <span class="text-muted small">Всего: [[ filteredJobIterations.length ]] [[ tokenSearchQuery.trim() || statusFilter || hideIgnoreRecords ? \'(найдено \' + filteredJobIterations.length + \')\' : \'\' ]]</span>' +
+            '          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="onFilterChange"><option value="">Все статусы</option><option value="init">init</option><option value="pending">pending</option><option value="success">success</option><option value="error">error</option><option value="ignore">ignore</option><option value="inactive">inactive</option></select>' +
+            '          <input type="text" class="form-control form-control-sm d-inline-block" style="width: 140px" placeholder="Поиск по токену/символу" v-model="tokenSearchQuery" @input="onTokenSearchInput" />' +
+            '          <label class="d-inline-flex align-items-center gap-1 mb-0"><input type="checkbox" v-model="hideIgnoreRecords" @change="onFilterChange" /> Игнорировать ignore записи</label>' +
+            '          <span class="text-muted small">Всего: [[ iterationsTotal ]]</span>' +
             '          <button class="btn btn-sm btn-outline-secondary" @click="resetIterationFilters">Сбросить фильтры</button>' +
             '        </div>' +
             '        <div v-if="loadingIterations" class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0 text-muted small">Загрузка итераций...</p></div>' +
@@ -657,9 +673,9 @@
             '          </tbody>' +
             '        </table></div>' +
             '        <nav v-if="iterationsTotalPages > 1" class="mt-2"><ul class="pagination pagination-sm">' +
-            '          <li class="page-item" :class="{disabled: iterationsPage <= 1}"><a class="page-link" href="#" @click.prevent="iterationsPage--">Назад</a></li>' +
+            '          <li class="page-item" :class="{disabled: iterationsPage <= 1}"><a class="page-link" href="#" @click.prevent="goToIterationsPage(-1)">Назад</a></li>' +
             '          <li class="page-item disabled"><span class="page-link">[[ iterationsPage ]] / [[ iterationsTotalPages ]]</span></li>' +
-            '          <li class="page-item" :class="{disabled: iterationsPage >= iterationsTotalPages}"><a class="page-link" href="#" @click.prevent="iterationsPage++">Вперёд</a></li>' +
+            '          <li class="page-item" :class="{disabled: iterationsPage >= iterationsTotalPages}"><a class="page-link" href="#" @click.prevent="goToIterationsPage(1)">Вперёд</a></li>' +
             '        </ul></nav>' +
             '        </template>' +
             '      </div>' +

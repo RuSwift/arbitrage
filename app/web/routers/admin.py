@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CrawlerIteration, CrawlerJob, Token
@@ -151,13 +151,26 @@ async def list_job_iterations(
     job_id: int,
     db: AsyncSession = Depends(get_async_db),
     page: int = Query(1, ge=1),
-    page_size: int = Query(5000, ge=1, le=20000),
+    page_size: int = Query(50, ge=1, le=500),
     status: str | None = Query(None),
+    token: str | None = Query(None, description="Search by token or symbol (substring)"),
+    hide_ignore: bool = Query(False, description="Exclude iterations with status=ignore"),
 ):
-    """List CrawlerIteration for a job with optional status filter."""
+    """List CrawlerIteration for a job with server-side pagination and filters."""
     base = select(CrawlerIteration).where(CrawlerIteration.crawler_job_id == job_id)
     if status:
         base = base.where(CrawlerIteration.status == status)
+    if hide_ignore:
+        base = base.where(CrawlerIteration.status != "ignore")
+    token_trimmed = (token or "").strip()
+    if token_trimmed:
+        pattern = f"%{token_trimmed}%"
+        base = base.where(
+            or_(
+                CrawlerIteration.token.ilike(pattern),
+                CrawlerIteration.symbol.ilike(pattern),
+            )
+        )
 
     total_result = await db.execute(select(func.count()).select_from(base.subquery()))
     total = total_result.scalar() or 0

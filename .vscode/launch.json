@@ -1,33 +1,37 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Web (FastAPI)",
-            "type": "python",
-            "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "app.web.main:app",
-                "--reload",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "8000"
-            ],
-            "cwd": "${workspaceFolder}",
-            "env": {},
-            "jinja": true,
-            "justMyCode": false
-        },
-        {
-            "name": "crawler2",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/scripts/crawler2.py",
-            "args": ["--exchange-id", "bybit", "--kind", "perpetual"],
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Web (FastAPI)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.web.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "env": {},
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "Web Prod (FastAPI)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.web.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env.prod",
+      "jinja": true,
+      "justMyCode": false
+    },
+    {
+      "name": "crawler2",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/crawler2.py",
+      "args": ["--exchange-id", "bybit", "--kind", "perpetual"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
 }
