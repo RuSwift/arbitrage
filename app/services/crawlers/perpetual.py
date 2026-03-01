@@ -184,11 +184,17 @@ class CEXPerpetualCrawler(BaseService):
         safe_sym = (symbol or "").replace("/", "_")
         return f"arbitrage:crawler:{self.kind}:window:{window_type}:{self._exchange_id}:{safe_sym}"
 
+    _WINDOW_KEY_MAGIC = "1"  # значение ключа новой схемы (с TTL); иное — старая схема (timestamp)
+
     def _may_fetch_by_window(self, redis: "Redis", key: str, window_min: int) -> bool:
-        """True если ключ отсутствует (или истёк по TTL); при True выставляет ключ с TTL = window_min минут."""
-        if redis.get(key) is not None:
-            return False
-        redis.setex(key, window_min * 60, "1")
+        """True если ключ отсутствует (или истёк по TTL); при True выставляет ключ с TTL = window_min минут.
+        Ключи с другим значением (старая схема с timestamp) или без TTL считаются устаревшими — удаляются и запрос разрешается."""
+        raw = redis.get(key)
+        if raw is not None:
+            if raw == self._WINDOW_KEY_MAGIC and redis.ttl(key) != -1:
+                return False
+            redis.delete(key)
+        redis.setex(key, window_min * 60, self._WINDOW_KEY_MAGIC)
         return True
 
     def _liquidity_usd_top_n(
