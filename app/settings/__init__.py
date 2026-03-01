@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import Session as SyncSession
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from app.db.models import ServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -221,12 +223,17 @@ class ServiceConfigRegistry:
 
     @classmethod
     def set(cls, db: SyncSession, config_name: str, config: BaseModel) -> None:
-        row = db.query(ServiceConfig).filter_by(service_name=config_name).first()
-        if row:
-            row.config = config.model_dump(mode="json")
-            row.updated_at = datetime.now(timezone.utc)
-        else:
-            db.add(ServiceConfig(service_name=config_name, config=config.model_dump(mode="json")))
+        now = datetime.now(timezone.utc)
+        payload = config.model_dump(mode="json")
+        stmt = pg_insert(ServiceConfig).values(
+            service_name=config_name,
+            config=payload,
+            updated_at=now,
+        ).on_conflict_do_update(
+            constraint="uq_service_config_service_name",
+            set_={"config": payload, "updated_at": now},
+        )
+        db.execute(stmt)
         db.commit()
 
     @classmethod
@@ -254,17 +261,17 @@ class ServiceConfigRegistry:
 
     @classmethod
     async def aset(cls, db: AsyncSession, config_name: str, config: BaseModel) -> None:
-        from sqlalchemy import select
-
-        result = await db.execute(
-            select(ServiceConfig).where(ServiceConfig.service_name == config_name)
+        now = datetime.now(timezone.utc)
+        payload = config.model_dump(mode="json")
+        stmt = pg_insert(ServiceConfig).values(
+            service_name=config_name,
+            config=payload,
+            updated_at=now,
+        ).on_conflict_do_update(
+            constraint="uq_service_config_service_name",
+            set_={"config": payload, "updated_at": now},
         )
-        row = result.scalar_one_or_none()
-        if row:
-            row.config = config.model_dump(mode="json")
-            row.updated_at = datetime.now(timezone.utc)
-        else:
-            db.add(ServiceConfig(service_name=config_name, config=config.model_dump(mode="json")))
+        await db.execute(stmt)
         await db.commit()
 
     @classmethod

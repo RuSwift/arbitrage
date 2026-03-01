@@ -155,7 +155,8 @@ class CEXPerpetualCrawler(BaseService):
                 it.symbol = p.code
                 it.currency_pair = p.as_dict()
                 if it.inactive_till_timestamp is None or it.inactive_till_timestamp <= now:
-                    it.status = "pending"
+                    if it.status != "success":
+                        it.status = "pending"
                     it.start = now
                     it.comment = None
                 publisher = PerpetualOrchestratorImpl(
