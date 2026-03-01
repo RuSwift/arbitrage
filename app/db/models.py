@@ -31,6 +31,7 @@ class Token(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     symbol = Column(String, nullable=False)
     source = Column(String, nullable=False)  # "coinmarketcap" | "manual"
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     # UTC
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=True)
