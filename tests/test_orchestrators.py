@@ -1,24 +1,28 @@
-"""Tests for sync and async orchestrator retrievers (get_price, get_depth: Redis then DB, warm Redis)."""
+"""Tests for sync and async orchestrator retrievers (get_price, get_depth, get_klines: Redis then DB, warm Redis)."""
 
 import json
 
 import pytest
 
-from app.cex.dto import BidAsk, BookDepth
+from app.cex.dto import BidAsk, BookDepth, CandleStick
 from app.cex.orcestrator import (
     AsyncPerpetualOrchestratorImpl,
     AsyncSpotOrchestratorImpl,
     PerpetualOrchestratorImpl,
+    PublishStrategy,
     SpotOrchestratorImpl,
     _book_depth_redis_key,
+    _candlestick_redis_key,
     _price_redis_key,
 )
-from app.db.models import BookDepthSnapshot, CurrencyPairSnapshot
+from app.db.models import BookDepthSnapshot, CandleStickSnapshot, CurrencyPairSnapshot
 
 TEST_EXCHANGE = "test"
 TEST_SYMBOL = "BTC/USDT"
 # Symbol with no row in DB for "empty" test isolation
 TEST_SYMBOL_EMPTY = "EMPTY/USDT"
+# Symbol only for get_klines-from-DB test to avoid interference from other tests' CandleStickSnapshot rows
+TEST_SYMBOL_KLINES_DB = "BTC/USDT_KLINES_DB"
 
 
 def _redis_price_key(kind: str, symbol: str = TEST_SYMBOL) -> str:
@@ -27,6 +31,30 @@ def _redis_price_key(kind: str, symbol: str = TEST_SYMBOL) -> str:
 
 def _redis_depth_key(kind: str, symbol: str = TEST_SYMBOL) -> str:
     return _book_depth_redis_key(TEST_EXCHANGE, kind, symbol)
+
+
+def _redis_candlestick_key(kind: str, symbol: str = TEST_SYMBOL) -> str:
+    return _candlestick_redis_key(TEST_EXCHANGE, kind, symbol)
+
+
+def _sample_candle(
+    utc_open_time: float = 60.0,
+    open_price: float = 100.0,
+    high_price: float = 101.0,
+    low_price: float = 99.0,
+    close_price: float = 100.5,
+    coin_volume: float = 1.0,
+    usd_volume: float | None = 50000.0,
+) -> CandleStick:
+    return CandleStick(
+        utc_open_time=utc_open_time,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        close_price=close_price,
+        coin_volume=coin_volume,
+        usd_volume=usd_volume,
+    )
 
 
 def _sample_book_depth(symbol: str = TEST_SYMBOL, utc: float = 1000.0) -> BookDepth:
@@ -366,6 +394,248 @@ class TestPerpetualOrchestratorImplDepth:
 
 
 # ---------------------------------------------------------------------------
+# Sync Candlestick (get_klines + publish_candlestick)
+# ---------------------------------------------------------------------------
+
+
+class TestSpotOrchestratorImplCandlestick:
+    """Sync Spot get_klines и publish_candlestick: Redis список, при нехватке — БД, merge newer wins."""
+
+    def test_get_klines_from_redis(self, db_session, redis_client):
+        """Если в Redis есть список свечей — get_klines возвращает их (свежие первые)."""
+        c1 = _sample_candle(utc_open_time=120.0, close_price=100.2)
+        c2 = _sample_candle(utc_open_time=60.0, close_price=100.0)
+        key = _redis_candlestick_key("spot")
+        redis_client.setex(key, 60, json.dumps([c1.as_dict(), c2.as_dict()]))
+        try:
+            orb = SpotOrchestratorImpl(
+                db_session=db_session,
+                redis=redis_client,
+                exchange_id=TEST_EXCHANGE,
+                kind="spot",
+                symbol=TEST_SYMBOL,
+                cache_timeout=60,
+                align_to_minutes=1,
+            )
+            out = orb.get_klines()
+            assert out is not None
+            assert len(out) == 2
+            assert out[0].utc_open_time == 120.0 and out[0].close_price == 100.2
+            assert out[1].utc_open_time == 60.0 and out[1].close_price == 100.0
+        finally:
+            redis_client.delete(key)
+
+    def test_get_klines_empty_returns_none(self, db_session, redis_client):
+        """Нет в Redis и нет в БД — возвращает None."""
+        key = _redis_candlestick_key("spot")
+        redis_client.delete(key)
+        orb = SpotOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=TEST_SYMBOL,
+            align_to_minutes=1,
+        )
+        assert orb.get_klines() is None
+
+    def test_get_klines_from_db_when_redis_has_less_than_limit(self, db_session, redis_client):
+        """Если в Redis меньше свечей чем limit — дозапрос из БД, merge, сортировка (свежие первые)."""
+        symbol = TEST_SYMBOL_KLINES_DB
+        db_session.query(CandleStickSnapshot).filter_by(
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=symbol,
+            align_to_minutes=1,
+        ).delete()
+        db_session.commit()
+        row1 = CandleStickSnapshot(
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=symbol,
+            span_in_minutes=1,
+            utc_open_time=180.0,
+            open_price=101.0,
+            high_price=102.0,
+            low_price=100.0,
+            close_price=101.5,
+            coin_volume=2.0,
+            usd_volume=203000.0,
+            utc=180.0,
+            align_to_minutes=1,
+            aligned_timestamp=180.0,
+        )
+        row2 = CandleStickSnapshot(
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=symbol,
+            span_in_minutes=1,
+            utc_open_time=120.0,
+            open_price=100.0,
+            high_price=101.0,
+            low_price=99.0,
+            close_price=100.5,
+            coin_volume=1.0,
+            usd_volume=100500.0,
+            utc=120.0,
+            align_to_minutes=1,
+            aligned_timestamp=120.0,
+        )
+        db_session.add(row1)
+        db_session.add(row2)
+        db_session.commit()
+        key = _redis_candlestick_key("spot", symbol)
+        redis_client.delete(key)
+        orb = SpotOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=symbol,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        out = orb.get_klines(limit=5)
+        assert out is not None
+        assert len(out) == 2
+        assert out[0].utc_open_time == 180.0 and out[0].close_price == 101.5
+        assert out[1].utc_open_time == 120.0 and out[1].close_price == 100.5
+        redis_client.delete(key)
+
+    def test_publish_candlestick_then_get_klines(self, db_session, redis_client):
+        """publish_candlestick пишет в Redis и БД; get_klines возвращает список (свежие первые)."""
+        orb = SpotOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        c1 = _sample_candle(utc_open_time=60.0, close_price=100.0)
+        c2 = _sample_candle(utc_open_time=120.0, close_price=100.5)
+        orb.publish_candlestick([c1, c2])
+        out = orb.get_klines()
+        assert out is not None
+        assert len(out) == 2
+        assert out[0].utc_open_time == 120.0 and out[0].close_price == 100.5
+        assert out[1].utc_open_time == 60.0 and out[1].close_price == 100.0
+        key = _redis_candlestick_key("spot")
+        raw = redis_client.get(key)
+        assert raw is not None
+        data = json.loads(raw)
+        assert len(data) == 2
+        redis_client.delete(key)
+
+    def test_get_klines_respects_limit(self, db_session, redis_client):
+        """get_klines(limit=N) возвращает не более N свечей."""
+        candles = [
+            _sample_candle(utc_open_time=60.0 * i, close_price=100.0 + i * 0.1)
+            for i in range(1, 6)
+        ]
+        key = _redis_candlestick_key("spot")
+        redis_client.setex(key, 60, json.dumps([c.as_dict() for c in candles]))
+        try:
+            orb = SpotOrchestratorImpl(
+                db_session=db_session,
+                redis=redis_client,
+                exchange_id=TEST_EXCHANGE,
+                kind="spot",
+                symbol=TEST_SYMBOL,
+                cache_timeout=60,
+                align_to_minutes=1,
+            )
+            out = orb.get_klines(limit=3)
+            assert out is not None
+            assert len(out) == 3
+            assert out[0].utc_open_time == 300.0
+        finally:
+            redis_client.delete(key)
+
+
+class TestPerpetualOrchestratorImplCandlestick:
+    """Sync Perpetual get_klines и publish_candlestick — та же логика."""
+
+    def test_get_klines_from_redis(self, db_session, redis_client):
+        c = _sample_candle(utc_open_time=240.0, close_price=50100.0)
+        key = _redis_candlestick_key("perpetual")
+        redis_client.setex(key, 60, json.dumps([c.as_dict()]))
+        try:
+            orb = PerpetualOrchestratorImpl(
+                db_session=db_session,
+                redis=redis_client,
+                exchange_id=TEST_EXCHANGE,
+                kind="perpetual",
+                symbol=TEST_SYMBOL,
+                cache_timeout=60,
+                align_to_minutes=1,
+            )
+            out = orb.get_klines()
+            assert out is not None
+            assert len(out) == 1
+            assert out[0].utc_open_time == 240.0 and out[0].close_price == 50100.0
+        finally:
+            redis_client.delete(key)
+
+    def test_publish_candlestick_then_get_klines(self, db_session, redis_client):
+        orb = PerpetualOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="perpetual",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        c = _sample_candle(utc_open_time=300.0, close_price=50200.0)
+        orb.publish_candlestick(c)
+        out = orb.get_klines()
+        assert out is not None
+        assert len(out) == 1
+        assert out[0].utc_open_time == 300.0 and out[0].close_price == 50200.0
+        key = _redis_candlestick_key("perpetual")
+        redis_client.delete(key)
+
+    def test_publish_candlestick_merge_strategy(self, db_session, redis_client):
+        """MERGE: входящие свечи объединяются с текущими из Redis, более свежая побеждает."""
+        orb = PerpetualOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="perpetual",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        existing = _sample_candle(utc_open_time=60.0, close_price=50000.0)
+        orb.publish_candlestick(existing)
+        updated = _sample_candle(utc_open_time=60.0, close_price=50050.0)
+        orb.publish_candlestick(updated, strategy=PublishStrategy.MERGE)
+        out = orb.get_klines()
+        assert out is not None
+        assert len(out) == 1
+        assert out[0].close_price == 50050.0
+        key = _redis_candlestick_key("perpetual")
+        redis_client.delete(key)
+
+    def test_publish_candlestick_replace_raises(self, db_session, redis_client):
+        """PublishStrategy.REPLACE для publish_candlestick поднимает ValueError."""
+        orb = PerpetualOrchestratorImpl(
+            db_session=db_session,
+            redis=redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="perpetual",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        c = _sample_candle(utc_open_time=60.0, close_price=50000.0)
+        with pytest.raises(ValueError, match="REPLACE is not supported for publish_candlestick"):
+            orb.publish_candlestick(c, strategy=PublishStrategy.REPLACE)
+
+
+# ---------------------------------------------------------------------------
 # Async Retriever (standalone functions so async fixtures resolve correctly)
 # ---------------------------------------------------------------------------
 
@@ -624,4 +894,112 @@ async def test_async_perpetual_get_depth_from_db_warms_redis(async_db_session, a
     assert out.utc == 8500.0
     raw = await async_redis_client.get(key)
     assert raw is not None
+    await async_redis_client.delete(key)
+
+
+# ---------------------------------------------------------------------------
+# Async Candlestick (get_klines only; publish_candlestick только в sync)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_spot_get_klines_from_redis(async_db_session, async_redis_client):
+    """Async Spot: get_klines возвращает данные из Redis (свежие первые)."""
+    c = _sample_candle(utc_open_time=180.0, close_price=100.3)
+    key = _redis_candlestick_key("spot")
+    await async_redis_client.set(key, json.dumps([c.as_dict()]), ex=60)
+    try:
+        orb = AsyncSpotOrchestratorImpl(
+            db_session=async_db_session,
+            redis=async_redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="spot",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        out = await orb.get_klines()
+        assert out is not None
+        assert len(out) == 1
+        assert out[0].utc_open_time == 180.0 and out[0].close_price == 100.3
+    finally:
+        await async_redis_client.delete(key)
+
+
+@pytest.mark.asyncio
+async def test_async_spot_get_klines_empty_returns_none(async_db_session, async_redis_client):
+    key = _redis_candlestick_key("spot")
+    await async_redis_client.delete(key)
+    orb = AsyncSpotOrchestratorImpl(
+        db_session=async_db_session,
+        redis=async_redis_client,
+        exchange_id=TEST_EXCHANGE,
+        kind="spot",
+        symbol=TEST_SYMBOL,
+        align_to_minutes=1,
+    )
+    assert await orb.get_klines() is None
+
+
+@pytest.mark.asyncio
+async def test_async_perpetual_get_klines_from_redis(async_db_session, async_redis_client):
+    c = _sample_candle(utc_open_time=360.0, close_price=50300.0)
+    key = _redis_candlestick_key("perpetual")
+    await async_redis_client.set(key, json.dumps([c.as_dict()]), ex=60)
+    try:
+        orb = AsyncPerpetualOrchestratorImpl(
+            db_session=async_db_session,
+            redis=async_redis_client,
+            exchange_id=TEST_EXCHANGE,
+            kind="perpetual",
+            symbol=TEST_SYMBOL,
+            cache_timeout=60,
+            align_to_minutes=1,
+        )
+        out = await orb.get_klines()
+        assert out is not None
+        assert len(out) == 1
+        assert out[0].close_price == 50300.0
+    finally:
+        await async_redis_client.delete(key)
+
+
+@pytest.mark.asyncio
+async def test_async_perpetual_get_klines_from_db_when_redis_has_less_than_limit(
+    async_db_session, async_redis_client
+):
+    """Async Perpetual: при нехватке данных в Redis дозапрос из БД, merge, сортировка."""
+    row = CandleStickSnapshot(
+        exchange_id=TEST_EXCHANGE,
+        kind="perpetual",
+        symbol=TEST_SYMBOL,
+        span_in_minutes=1,
+        utc_open_time=420.0,
+        open_price=50400.0,
+        high_price=50500.0,
+        low_price=50300.0,
+        close_price=50450.0,
+        coin_volume=3.0,
+        usd_volume=151350.0,
+        utc=420.0,
+        align_to_minutes=1,
+        aligned_timestamp=420.0,
+    )
+    async_db_session.add(row)
+    await async_db_session.commit()
+    key = _redis_candlestick_key("perpetual")
+    await async_redis_client.delete(key)
+    orb = AsyncPerpetualOrchestratorImpl(
+        db_session=async_db_session,
+        redis=async_redis_client,
+        exchange_id=TEST_EXCHANGE,
+        kind="perpetual",
+        symbol=TEST_SYMBOL,
+        cache_timeout=60,
+        align_to_minutes=1,
+    )
+    out = await orb.get_klines(limit=5)
+    assert out is not None
+    assert len(out) >= 1
+    assert out[0].utc_open_time == 420.0 and out[0].close_price == 50450.0
     await async_redis_client.delete(key)

@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import time
 from typing import TYPE_CHECKING, Protocol
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 from sqlalchemy import select
 
-from app.db.models import BookDepthSnapshot, CurrencyPairSnapshot
+from app.db.models import BookDepthSnapshot, CandleStickSnapshot, CurrencyPairSnapshot
 from enum import Enum
 
 class PublishStrategy(Enum):
@@ -260,6 +261,74 @@ def _parse_depth_from_redis(raw: bytes | str | None) -> BookDepth | None:
         return None
 
 
+def _candlestick_redis_key(exchange_id: str, kind: str, symbol: str) -> str:
+    return f"arbitrage:orchestrator:candlestick:{exchange_id}:{kind}:{symbol}"
+
+
+def _parse_candlestick_list_from_redis(raw: bytes | str | None) -> list[CandleStick] | None:
+    """Парсит значение из Redis (JSON-массив) в list[CandleStick]. Возвращает None если raw пусто или невалидно."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return None
+        return [CandleStick.from_dict(item) for item in data]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _normalize_and_merge_candlesticks(
+    candles: list[CandleStick],
+    align_to_minutes: int,
+    *,
+    exchange_id: str | None = None,
+    kind: str | None = None,
+    symbol: str | None = None,
+) -> list[CandleStick]:
+    """
+    Убирает пересечения по aligned_utc: для одного aligned_utc оставляет одну свечу (более свежая по utc_open_time).
+    При пересечении пишет log.critical. Возвращает список без дубликатов по aligned_utc.
+    """
+    if not candles:
+        return []
+    by_aligned: dict[float, list[CandleStick]] = {}
+    for c in candles:
+        aligned = _align_utc(c.utc_open_time, align_to_minutes)
+        if aligned is None:
+            continue
+        by_aligned.setdefault(aligned, []).append(c)
+    result: list[CandleStick] = []
+    for aligned_utc, group in by_aligned.items():
+        if len(group) > 1:
+            logging.critical(
+                "candlestick overlap by aligned_utc, merging newer wins",
+                extra={"exchange_id": exchange_id, "kind": kind, "symbol": symbol, "aligned_utc": aligned_utc},
+            )
+        winner = max(group, key=lambda x: x.utc_open_time)
+        result.append(winner)
+    result.sort(key=lambda c: c.utc_open_time, reverse=True)
+    return result
+
+
+def _merge_candlestick_lists_newer_wins(
+    a: list[CandleStick], b: list[CandleStick], align_to_minutes: int
+) -> list[CandleStick]:
+    """Объединяет два списка свечей: по aligned_utc оставляет более свежую (по utc_open_time). Сортировка: свежие первые."""
+    by_aligned: dict[float, CandleStick] = {}
+    for c in a + b:
+        aligned = _align_utc(c.utc_open_time, align_to_minutes)
+        if aligned is None:
+            continue
+        if aligned not in by_aligned or c.utc_open_time > by_aligned[aligned].utc_open_time:
+            by_aligned[aligned] = c
+    result = list(by_aligned.values())
+    result.sort(key=lambda x: x.utc_open_time, reverse=True)
+    return result
+
+
 class SpotOrchestratorImpl:
     """
     Реализация оркестратора для spot: SpotPublisher + SpotRetriever.
@@ -353,7 +422,44 @@ class SpotOrchestratorImpl:
         return depth
 
     def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
-        raise NotImplementedError
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        from_redis = _parse_candlestick_list_from_redis(raw) or []
+        if limit is not None and len(from_redis) < limit:
+            need = limit
+            db_records = (
+                self._db_session.query(CandleStickSnapshot)
+                .filter_by(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    align_to_minutes=self._align_to_minutes,
+                )
+                .order_by(CandleStickSnapshot.aligned_timestamp.desc())
+                .limit(need)
+                .all()
+            )
+            from_db = [
+                CandleStick(
+                    utc_open_time=r.utc_open_time,
+                    open_price=r.open_price,
+                    high_price=r.high_price,
+                    low_price=r.low_price,
+                    close_price=r.close_price,
+                    coin_volume=r.coin_volume,
+                    usd_volume=r.usd_volume,
+                )
+                for r in db_records
+            ]
+            merged = _merge_candlestick_lists_newer_wins(
+                from_redis, from_db, self._align_to_minutes
+            )
+        else:
+            merged = list(from_redis)
+            merged.sort(key=lambda x: x.utc_open_time, reverse=True)
+        if limit is not None:
+            merged = merged[:limit]
+        return merged if merged else None
 
     def get_withdraw_info(self) -> dict[str, list[WithdrawInfo]] | None:
         raise NotImplementedError
@@ -452,7 +558,68 @@ class SpotOrchestratorImpl:
     def publish_candlestick(
         self, candlestick: CandleStick | list[CandleStick], strategy: PublishStrategy = PublishStrategy.MERGE
     ) -> None:
-        raise NotImplementedError
+        if strategy == PublishStrategy.REPLACE:
+            raise ValueError("PublishStrategy.REPLACE is not supported for publish_candlestick")
+        incoming: list[CandleStick] = (
+            [candlestick] if isinstance(candlestick, CandleStick) else list(candlestick)
+        )
+        normalized = _normalize_and_merge_candlesticks(
+            incoming,
+            self._align_to_minutes,
+            exchange_id=self._exchange_id,
+            kind=self._kind,
+            symbol=self._symbol,
+        )
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        current = _parse_candlestick_list_from_redis(raw) or []
+        final = _merge_candlestick_lists_newer_wins(
+            normalized, current, self._align_to_minutes
+        )
+        value = json.dumps([c.as_dict() for c in final])
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        cutoff = now - self._align_to_minutes * 60
+        for c in final:
+            aligned_ts = _align_utc(c.utc_open_time, self._align_to_minutes)
+            if aligned_ts is None or aligned_ts < cutoff:
+                continue
+            record = self._db_session.query(CandleStickSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_ts,
+            ).first()
+            if record is None:
+                record = CandleStickSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    span_in_minutes=self._align_to_minutes,
+                    utc_open_time=c.utc_open_time,
+                    open_price=c.open_price,
+                    high_price=c.high_price,
+                    low_price=c.low_price,
+                    close_price=c.close_price,
+                    coin_volume=c.coin_volume,
+                    usd_volume=c.usd_volume,
+                    utc=c.utc_open_time,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_ts,
+                )
+                self._db_session.add(record)
+            else:
+                if record.utc is None or c.utc_open_time > record.utc:
+                    record.utc_open_time = c.utc_open_time
+                    record.open_price = c.open_price
+                    record.high_price = c.high_price
+                    record.low_price = c.low_price
+                    record.close_price = c.close_price
+                    record.coin_volume = c.coin_volume
+                    record.usd_volume = c.usd_volume
+                    record.utc = c.utc_open_time
+        self._db_session.commit()
 
     def publish_withdraw_info(
         self, withdraw_infos: dict[str, list[WithdrawInfo]]
@@ -554,7 +721,45 @@ class AsyncSpotOrchestratorImpl:
         return depth
 
     async def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
-        raise NotImplementedError
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        from_redis = _parse_candlestick_list_from_redis(raw) or []
+        if limit is not None and len(from_redis) < limit:
+            need = limit
+            stmt = (
+                select(CandleStickSnapshot)
+                .where(
+                    CandleStickSnapshot.exchange_id == self._exchange_id,
+                    CandleStickSnapshot.kind == self._kind,
+                    CandleStickSnapshot.symbol == self._symbol,
+                    CandleStickSnapshot.align_to_minutes == self._align_to_minutes,
+                )
+                .order_by(CandleStickSnapshot.aligned_timestamp.desc())
+                .limit(need)
+            )
+            result = await self._db_session.execute(stmt)
+            db_records = result.scalars().all()
+            from_db = [
+                CandleStick(
+                    utc_open_time=r.utc_open_time,
+                    open_price=r.open_price,
+                    high_price=r.high_price,
+                    low_price=r.low_price,
+                    close_price=r.close_price,
+                    coin_volume=r.coin_volume,
+                    usd_volume=r.usd_volume,
+                )
+                for r in db_records
+            ]
+            merged = _merge_candlestick_lists_newer_wins(
+                from_redis, from_db, self._align_to_minutes
+            )
+        else:
+            merged = list(from_redis)
+            merged.sort(key=lambda x: x.utc_open_time, reverse=True)
+        if limit is not None:
+            merged = merged[:limit]
+        return merged if merged else None
 
     async def get_withdraw_info(self) -> dict[str, list[WithdrawInfo]] | None:
         raise NotImplementedError
@@ -653,7 +858,44 @@ class PerpetualOrchestratorImpl:
         return depth
 
     def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
-        raise NotImplementedError
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        from_redis = _parse_candlestick_list_from_redis(raw) or []
+        if limit is not None and len(from_redis) < limit:
+            need = limit
+            db_records = (
+                self._db_session.query(CandleStickSnapshot)
+                .filter_by(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    align_to_minutes=self._align_to_minutes,
+                )
+                .order_by(CandleStickSnapshot.aligned_timestamp.desc())
+                .limit(need)
+                .all()
+            )
+            from_db = [
+                CandleStick(
+                    utc_open_time=r.utc_open_time,
+                    open_price=r.open_price,
+                    high_price=r.high_price,
+                    low_price=r.low_price,
+                    close_price=r.close_price,
+                    coin_volume=r.coin_volume,
+                    usd_volume=r.usd_volume,
+                )
+                for r in db_records
+            ]
+            merged = _merge_candlestick_lists_newer_wins(
+                from_redis, from_db, self._align_to_minutes
+            )
+        else:
+            merged = list(from_redis)
+            merged.sort(key=lambda x: x.utc_open_time, reverse=True)
+        if limit is not None:
+            merged = merged[:limit]
+        return merged if merged else None
 
     def get_funding_rate(self) -> FundingRate | None:
         raise NotImplementedError
@@ -757,7 +999,68 @@ class PerpetualOrchestratorImpl:
     def publish_candlestick(
         self, candlestick: CandleStick | list[CandleStick], strategy: PublishStrategy = PublishStrategy.MERGE
     ) -> None:
-        raise NotImplementedError
+        if strategy == PublishStrategy.REPLACE:
+            raise ValueError("PublishStrategy.REPLACE is not supported for publish_candlestick")
+        incoming: list[CandleStick] = (
+            [candlestick] if isinstance(candlestick, CandleStick) else list(candlestick)
+        )
+        normalized = _normalize_and_merge_candlesticks(
+            incoming,
+            self._align_to_minutes,
+            exchange_id=self._exchange_id,
+            kind=self._kind,
+            symbol=self._symbol,
+        )
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = self._redis.get(key)
+        current = _parse_candlestick_list_from_redis(raw) or []
+        final = _merge_candlestick_lists_newer_wins(
+            normalized, current, self._align_to_minutes
+        )
+        value = json.dumps([c.as_dict() for c in final])
+        self._redis.setex(key, int(self._cache_timeout), value)
+        now = time.time()
+        cutoff = now - self._align_to_minutes * 60
+        for c in final:
+            aligned_ts = _align_utc(c.utc_open_time, self._align_to_minutes)
+            if aligned_ts is None or aligned_ts < cutoff:
+                continue
+            record = self._db_session.query(CandleStickSnapshot).filter_by(
+                exchange_id=self._exchange_id,
+                kind=self._kind,
+                symbol=self._symbol,
+                align_to_minutes=self._align_to_minutes,
+                aligned_timestamp=aligned_ts,
+            ).first()
+            if record is None:
+                record = CandleStickSnapshot(
+                    exchange_id=self._exchange_id,
+                    kind=self._kind,
+                    symbol=self._symbol,
+                    span_in_minutes=self._align_to_minutes,
+                    utc_open_time=c.utc_open_time,
+                    open_price=c.open_price,
+                    high_price=c.high_price,
+                    low_price=c.low_price,
+                    close_price=c.close_price,
+                    coin_volume=c.coin_volume,
+                    usd_volume=c.usd_volume,
+                    utc=c.utc_open_time,
+                    align_to_minutes=self._align_to_minutes,
+                    aligned_timestamp=aligned_ts,
+                )
+                self._db_session.add(record)
+            else:
+                if record.utc is None or c.utc_open_time > record.utc:
+                    record.utc_open_time = c.utc_open_time
+                    record.open_price = c.open_price
+                    record.high_price = c.high_price
+                    record.low_price = c.low_price
+                    record.close_price = c.close_price
+                    record.coin_volume = c.coin_volume
+                    record.usd_volume = c.usd_volume
+                    record.utc = c.utc_open_time
+        self._db_session.commit()
 
     def publish_funding_rate(self, funding_rate: FundingRate) -> None:
         raise NotImplementedError
@@ -862,7 +1165,45 @@ class AsyncPerpetualOrchestratorImpl:
         return depth
 
     async def get_klines(self, limit: int | None = None) -> list[CandleStick] | None:
-        raise NotImplementedError
+        key = _candlestick_redis_key(self._exchange_id, self._kind, self._symbol)
+        raw = await self._redis.get(key)
+        from_redis = _parse_candlestick_list_from_redis(raw) or []
+        if limit is not None and len(from_redis) < limit:
+            need = limit
+            stmt = (
+                select(CandleStickSnapshot)
+                .where(
+                    CandleStickSnapshot.exchange_id == self._exchange_id,
+                    CandleStickSnapshot.kind == self._kind,
+                    CandleStickSnapshot.symbol == self._symbol,
+                    CandleStickSnapshot.align_to_minutes == self._align_to_minutes,
+                )
+                .order_by(CandleStickSnapshot.aligned_timestamp.desc())
+                .limit(need)
+            )
+            result = await self._db_session.execute(stmt)
+            db_records = result.scalars().all()
+            from_db = [
+                CandleStick(
+                    utc_open_time=r.utc_open_time,
+                    open_price=r.open_price,
+                    high_price=r.high_price,
+                    low_price=r.low_price,
+                    close_price=r.close_price,
+                    coin_volume=r.coin_volume,
+                    usd_volume=r.usd_volume,
+                )
+                for r in db_records
+            ]
+            merged = _merge_candlestick_lists_newer_wins(
+                from_redis, from_db, self._align_to_minutes
+            )
+        else:
+            merged = list(from_redis)
+            merged.sort(key=lambda x: x.utc_open_time, reverse=True)
+        if limit is not None:
+            merged = merged[:limit]
+        return merged if merged else None
 
     async def get_funding_rate(self) -> FundingRate | None:
         raise NotImplementedError
