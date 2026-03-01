@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -181,18 +180,15 @@ class CEXPerpetualCrawler(BaseService):
         return [it for it in iterations if it.status == "pending"]
 
     def _redis_window_key(self, window_type: str, symbol: str) -> str:
-        """Ключ Redis для хранения timestamp последнего запроса по окну."""
+        """Ключ Redis для окна (значение с TTL, по истечении — повторный запрос разрешён)."""
         safe_sym = (symbol or "").replace("/", "_")
         return f"arbitrage:crawler:{self.kind}:window:{window_type}:{self._exchange_id}:{safe_sym}"
 
     def _may_fetch_by_window(self, redis: "Redis", key: str, window_min: int) -> bool:
-        """True если прошло не менее window_min минут с последнего запроса; при True обновляет timestamp в Redis."""
-        now = time.time()
-        last_raw = redis.get(key)
-        last_ts = float(last_raw) if last_raw else 0.0
-        if now - last_ts < window_min * 60:
+        """True если ключ отсутствует (или истёк по TTL); при True выставляет ключ с TTL = window_min минут."""
+        if redis.get(key) is not None:
             return False
-        redis.set(key, str(now))
+        redis.setex(key, window_min * 60, "1")
         return True
 
     def _liquidity_usd_top_n(

@@ -44,7 +44,7 @@
                 var askPrice = Number(asks[rowIndex].price);
                 if (!bidPrice || !askPrice || askPrice <= bidPrice) return '—';
                 var mid = (bidPrice + askPrice) / 2;
-                var spreadPct = (2 * (askPrice - bidPrice) / mid) * 100;
+                var spreadPct = ((askPrice - bidPrice) / mid) * 100;
                 return spreadPct.toFixed(2) + '%';
             },
             formatOrderPrice: function (p) {
@@ -54,10 +54,19 @@
             formatUsd: function (val) {
                 if (val == null || isNaN(val)) return '—';
                 return Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            },
+            bookDepthTimestamp: function () {
+                var bd = this.bookDepth;
+                if (!bd || bd.utc == null) return '—';
+                var sec = Number(bd.utc);
+                if (isNaN(sec)) return '—';
+                var d = new Date(sec * 1000);
+                return d.toISOString ? d.toISOString() : d.toLocaleString();
             }
         },
         template:
             '<div v-if="bookDepth" class="order-book-binance mb-4">' +
+            '  <div class="order-book-timestamp small mb-2" style="color: #b0b0b0;">timestamp BookDepth: [[ bookDepthTimestamp() ]]</div>' +
             '  <div class="order-book-header">' +
             '    <span class="order-book-title"><i class="bi bi-graph-up me-1"></i>Order Book</span>' +
             '    <span class="order-book-symbol">[[ bookDepth.symbol || token || \'\' ]]</span>' +
