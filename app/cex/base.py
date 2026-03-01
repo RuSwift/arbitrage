@@ -159,6 +159,13 @@ class _BaseCEXConnectorMixin:
 class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
     """Base connector for spot market: tickers, prices, orderbook, klines."""
 
+    Registry: dict[str, type[BaseCEXSpotConnector]] = {}
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if not getattr(cls, "__abstractmethods__", None):
+            cls.Registry[cls.exchange_id()] = cls
+
     @classmethod
     @abstractmethod
     def exchange_id(cls) -> str:
@@ -206,6 +213,13 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
 
 class BaseCEXPerpetualConnector(_BaseCEXConnectorMixin, ABC):
     """Base connector for perpetual (linear) futures: perpetual list, prices, orderbook, klines."""
+
+    Registry: dict[str, type[BaseCEXPerpetualConnector]] = {}
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if not getattr(cls, "__abstractmethods__", None):
+            cls.Registry[cls.exchange_id()] = cls
 
     @classmethod
     @abstractmethod

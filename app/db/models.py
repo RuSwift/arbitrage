@@ -76,6 +76,7 @@ class CrawlerIteration(Base):
         nullable=False,
     )
     token = Column(String, nullable=False)
+    symbol = Column(String, nullable=True)
     start = Column(DateTime(timezone=True), nullable=False)
     stop = Column(DateTime(timezone=True), nullable=True)
     done = Column(Boolean, default=False, nullable=False)
