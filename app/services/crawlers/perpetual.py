@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SyncDBSession
 
 from app.cex.base import BaseCEXPerpetualConnector
+from app.cex.orcestrator import PerpetualOrchestratorImpl
+
+if TYPE_CHECKING:
+    from redis import Redis
+
 from app.cex.dto import CurrencyPair
 from app.db.models import CrawlerIteration, CrawlerJob, Token
 from app.services.base import BaseService
@@ -22,10 +29,8 @@ class CEXPerpetualCrawler(BaseService):
     class Config(BaseModel, extra="ignore"):
         """Конфиг краулера. Задаётся при создании или из БД (service_config)."""
 
-        
-        """Сколько токенов брать из CoinMarketCap (top N)."""
-        window_sec: int = 60
-        """Окно в секундах для rate-limit трекера CEX API."""
+        align_to_minutes: int = 1  # выравнивание timestamp до N минут
+        cache_timeout: float = 15.0  # TTL кеша в Redis для оркестратора
 
     ConfigModel: type[BaseModel] = Config
 
@@ -92,8 +97,14 @@ class CEXPerpetualCrawler(BaseService):
         await self.db.refresh(job)
         return job
     
-    def prepare_job_iterations(self, job_id: int, db: SyncDBSession) -> list[CrawlerIteration]:
-        """Синхронно: коннектор + загрузка токенов и upsert итераций через переданную SyncDBSession. job_id — id CrawlerJob (в поток не передавать ORM-объекты от async-сессии)."""
+    def prepare_job_iterations(
+        self,
+        job_id: int,
+        db: SyncDBSession,
+        redis: "Redis",
+        config: Config,
+    ) -> list[CrawlerIteration]:
+        """Синхронно: коннектор + загрузка токенов и upsert итераций через переданную SyncDBSession, Sync Redis и конфиг. job_id — id CrawlerJob (в поток не передавать ORM-объекты от async-сессии)."""
         result = db.execute(select(Token).order_by(Token.id))
         tokens = list(result.scalars().all())
         symbols_ordered = list(dict.fromkeys(t.symbol for t in tokens))
@@ -138,6 +149,16 @@ class CEXPerpetualCrawler(BaseService):
                 it.currency_pair = p.as_dict()
                 it.status = "pending"
                 it.comment = None
+                publisher = PerpetualOrchestratorImpl(
+                    db_session=db,
+                    redis=redis,
+                    exchange_id=self._exchange_id,
+                    kind="perpetual",
+                    symbol=p.code,
+                    cache_timeout=config.cache_timeout,
+                    align_to_minutes=config.align_to_minutes,
+                )
+                publisher.publish_price(p)
             else:
                 it.status = "ignore"
                 it.comment = "missing in exchange" if symbol not in bases_on_exchange else "missing in tokens list"

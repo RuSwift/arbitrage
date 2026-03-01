@@ -22,15 +22,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session as SyncSession, sessionmaker
 
+import redis
+from redis.asyncio import from_url as redis_from_url
+
 from app.services.crawlers.perpetual import CEXPerpetualCrawler
 from app.services.tokens import TokensService
 from app.services.unit_of_work import UnitOfWork
-from app.settings import Settings
+from app.settings import ServiceConfigRegistry, Settings
 
 logger = logging.getLogger(__name__)
 
 
-async def _run(
+async def _run_perpetual(
     log: logging.Logger,
     exchange_ids: tuple[str, ...],
     kind: str,
@@ -50,8 +53,6 @@ async def _run(
         autoflush=False,
     )
     try:
-        from redis.asyncio import from_url as redis_from_url
-
         async with redis_from_url(settings.redis.url) as redis_client:
             async with async_factory() as db:
                 uow = UnitOfWork(db=db, redis=redis_client)
@@ -63,6 +64,12 @@ async def _run(
 
                 if kind != "perpetual":
                     return
+                config = await ServiceConfigRegistry.aget(
+                    db, "PerpetualCrawler", CEXPerpetualCrawler.Config
+                )
+                if config is None:
+                    config = CEXPerpetualCrawler.Config()
+                    await ServiceConfigRegistry.aset(db, "PerpetualCrawler", config)
                 sync_engine = create_engine(
                     settings.database.url,
                     echo=settings.database.echo,
@@ -75,6 +82,7 @@ async def _run(
                     autocommit=False,
                     autoflush=False,
                 )
+                sync_redis = redis.from_url(settings.redis.url)
                 try:
                     for exchange_id in exchange_ids:
                         job = None
@@ -89,6 +97,8 @@ async def _run(
                                 crawler,
                                 job_id,
                                 sync_factory,
+                                sync_redis,
+                                config,
                             )
                             job.error = None
                             await db.commit()
@@ -109,6 +119,7 @@ async def _run(
                                 job.error = str(e)
                                 await db.commit()
                 finally:
+                    sync_redis.close()
                     sync_engine.dispose()
     finally:
         await engine.dispose()
@@ -118,10 +129,12 @@ def _prepare_job_iterations_in_thread(
     crawler: CEXPerpetualCrawler,
     job_id: int,
     sync_factory,
+    sync_redis,
+    config,
 ):
     """Выполняет prepare_job_iterations в отдельном потоке. Передаём только job_id, не ORM job — иначе MissingGreenlet (async-сессия в другом потоке)."""
     with sync_factory() as sync_db:
-        iterations = crawler.prepare_job_iterations(job_id, sync_db)
+        iterations = crawler.prepare_job_iterations(job_id, sync_db, sync_redis, config)
         sync_db.commit()
         return iterations
 
@@ -171,7 +184,7 @@ def main() -> int:
             args.kind,
         )
         exchange_ids = (args.exchange_id,)
-        asyncio.run(_run(logger, exchange_ids=exchange_ids, kind=args.kind))
+        asyncio.run(_run_perpetual(logger, exchange_ids=exchange_ids, kind=args.kind))
         logger.info("crawler2 finished")
         return 0
     except Exception as e:

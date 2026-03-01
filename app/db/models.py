@@ -85,6 +85,8 @@ class CrawlerIteration(Base):
     comment = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     last_update = Column(DateTime(timezone=True), nullable=False)
+    inactive_till_timestamp = Column(DateTime(timezone=True), nullable=True)
+    """Если задано — запись не берётся в работу до этого времени (UTC)."""
 
     # JSON columns for crawler result data (DTO serialization from app.cex.dto)
     currency_pair = Column(JSONB, nullable=True)  # CurrencyPair
