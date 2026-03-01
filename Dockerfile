@@ -29,7 +29,7 @@ RUN poetry install --no-root --only main
 COPY app ./app
 COPY scripts ./scripts
 COPY alembic ./alembic
-COPY alembic.ini ./
+COPY alembic.ini run_migrations.py ./
 
 # Supervisord config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

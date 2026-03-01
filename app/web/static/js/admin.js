@@ -71,7 +71,8 @@
                 selectedVolumeCandleIndex: null,
                 exchanges: [],
                 connectors: ['spot', 'perpetual'],
-                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null }
+                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null },
+                errorModal: { show: false, text: '' }
             };
         },
         mounted: function () {
@@ -161,6 +162,12 @@
             },
             closeFundingDetailModal: function () {
                 this.fundingDetailModal = { show: false, title: '', token: '', type: '', data: null };
+            },
+            openErrorModal: function (text) {
+                this.errorModal = { show: true, text: text || '' };
+            },
+            closeErrorModal: function () {
+                this.errorModal = { show: false, text: '' };
             },
             formatUtc: function (utc) {
                 if (utc == null) return '—';
@@ -312,13 +319,14 @@
             '      <div v-if="loadingIterations" class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0 text-muted small">Загрузка итераций...</p></div>' +
             '      <template v-else>' +
             '      <div class="table-responsive"><table class="table table-sm">' +
-            '        <thead><tr><th>ID</th><th>Токен</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
+            '        <thead><tr><th>ID</th><th>Токен</th><th>Старт</th><th>Стоп</th><th>Статус</th><th>done</th><th>Error</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
             '        <tbody>' +
             '          <tr v-for="it in paginatedJobIterations" :key="it.id">' +
             '            <td>[[ it.id ]]</td><td>[[ it.token ]]</td>' +
             '            <td>[[ formatDate(it.start) ]]</td><td>[[ formatDate(it.stop) ]]</td>' +
             '            <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : it.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
             '            <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
+            '            <td><span v-if="it.error" class="text-danger small text-truncate d-inline-block" style="max-width:120px; cursor:pointer" @click="openErrorModal(it.error)" :title="it.error">[[ it.error.length > 25 ? it.error.substring(0,25)+\'…\' : it.error ]]</span><span v-else>—</span></td>' +
             '            <td>[[ it.currency_pair && it.currency_pair.ratio != null ? formatOrderPrice(it.currency_pair.ratio) : \'—\' ]]</td>' +
             '            <td><a href="#" v-if="it.funding_rate" @click.prevent="showFundingDetail(it, \'fr\')" class="small" :title="formatRatioPct(it.funding_rate.rate)">[[ formatRatioPct(it.funding_rate.rate) ]]</a><span v-else>—</span></td>' +
             '            <td><a href="#" v-if="it.next_funding_rate" @click.prevent="showFundingDetail(it, \'next\')" class="small">[[ it.next_funding_rate.next_funding_utc != null ? formatUtc(it.next_funding_rate.next_funding_utc) : (it.next_funding_rate.next_rate != null ? formatRatioPct(it.next_funding_rate.next_rate) : \'…\') ]]</a><span v-else>—</span></td>' +
@@ -395,6 +403,20 @@
             '    <button class="btn btn-secondary btn-sm" @click="closeFundingDetailModal">Закрыть</button>' +
             '  </template>' +
             '</modal-window>' +
+            '<modal-window v-if="errorModal.show" width="500px" height="auto">' +
+            '  <template slot="header">' +
+            '    <div class="d-flex justify-content-between align-items-center w-100">' +
+            '      <h6 class="mb-0">Ошибка</h6>' +
+            '      <button type="button" class="btn-close" @click="closeErrorModal"></button>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="body">' +
+            '    <pre class="bg-light p-2 small mb-0" style="white-space:pre-wrap; word-break:break-all; max-height:300px; overflow:auto">[[ errorModal.text ]]</pre>' +
+            '  </template>' +
+            '  <template slot="footer">' +
+            '    <button class="btn btn-secondary btn-sm" @click="closeErrorModal">Закрыть</button>' +
+            '  </template>' +
+            '</modal-window>' +
             '</div>'
     });
 
@@ -419,7 +441,8 @@
                 showIterationModal: false,
                 loadingIterationDetail: false,
                 selectedVolumeCandleIndex: null,
-                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null }
+                fundingDetailModal: { show: false, title: '', token: '', type: '', data: null },
+                errorModal: { show: false, text: '' }
             };
         },
         mounted: function () {
@@ -505,6 +528,12 @@
             },
             closeFundingDetailModal: function () {
                 this.fundingDetailModal = { show: false, title: '', token: '', type: '', data: null };
+            },
+            openErrorModal: function (text) {
+                this.errorModal = { show: true, text: text || '' };
+            },
+            closeErrorModal: function () {
+                this.errorModal = { show: false, text: '' };
             },
             formatUtc: function (utc) {
                 if (utc == null) return '—';
@@ -609,7 +638,7 @@
             '        <div v-if="loadingIterations" class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0 text-muted small">Загрузка итераций...</p></div>' +
             '        <template v-else>' +
             '        <div class="table-responsive"><table class="table table-sm">' +
-            '          <thead><tr><th>ID</th><th>Токен</th><th>Символ</th><th>Старт</th><th>Стоп</th><th>Неактивна до</th><th>Статус</th><th>done</th><th>comment</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
+            '          <thead><tr><th>ID</th><th>Токен</th><th>Символ</th><th>Старт</th><th>Стоп</th><th>Неактивна до</th><th>Статус</th><th>done</th><th>comment</th><th>Error</th><th>Курс</th><th>FR</th><th>Next FR</th><th>Hist</th><th></th></tr></thead>' +
             '          <tbody>' +
             '            <tr v-for="it in paginatedJobIterations" :key="it.id">' +
             '              <td>[[ it.id ]]</td><td>[[ it.token ]]</td><td>[[ it.symbol || \'—\' ]]</td>' +
@@ -618,6 +647,7 @@
             '              <td><span class="badge" :class="it.status === \'success\' ? \'bg-success\' : it.status === \'error\' ? \'bg-danger\' : it.status === \'inactive\' ? \'bg-secondary\' : \'bg-warning text-dark\'">[[ it.status ]]</span></td>' +
             '              <td>[[ it.done ? \'✓\' : \'—\' ]]</td>' +
             '              <td><span class="small text-muted" :title="it.comment" style="max-width:120px; display:inline-block; overflow:hidden; text-overflow:ellipsis">[[ it.comment || \'—\' ]]</span></td>' +
+            '              <td><span v-if="it.error" class="text-danger small text-truncate d-inline-block" style="max-width:120px; cursor:pointer" @click="openErrorModal(it.error)" :title="it.error">[[ it.error.length > 25 ? it.error.substring(0,25)+\'…\' : it.error ]]</span><span v-else>—</span></td>' +
             '              <td>[[ it.currency_pair && it.currency_pair.ratio != null ? formatPrice(it.currency_pair.ratio) : \'—\' ]]</td>' +
             '              <td><a href="#" v-if="it.funding_rate" @click.prevent="showFundingDetail(it, \'fr\')" class="small" :title="formatRatioPct(it.funding_rate.rate)">[[ formatRatioPct(it.funding_rate.rate) ]]</a><span v-else>—</span></td>' +
             '              <td><a href="#" v-if="it.next_funding_rate" @click.prevent="showFundingDetail(it, \'next\')" class="small">[[ it.next_funding_rate.next_funding_utc != null ? formatUtc(it.next_funding_rate.next_funding_utc) : (it.next_funding_rate.next_rate != null ? formatRatioPct(it.next_funding_rate.next_rate) : \'…\') ]]</a><span v-else>—</span></td>' +
@@ -691,6 +721,20 @@
             '  </template>' +
             '  <template slot="footer">' +
             '    <button class="btn btn-secondary btn-sm" @click="closeFundingDetailModal">Закрыть</button>' +
+            '  </template>' +
+            '</modal-window>' +
+            '<modal-window v-if="errorModal.show" width="500px" height="auto">' +
+            '  <template slot="header">' +
+            '    <div class="d-flex justify-content-between align-items-center w-100">' +
+            '      <h6 class="mb-0">Ошибка</h6>' +
+            '      <button type="button" class="btn-close" @click="closeErrorModal"></button>' +
+            '    </div>' +
+            '  </template>' +
+            '  <template slot="body">' +
+            '    <pre class="bg-light p-2 small mb-0" style="white-space:pre-wrap; word-break:break-all; max-height:300px; overflow:auto">[[ errorModal.text ]]</pre>' +
+            '  </template>' +
+            '  <template slot="footer">' +
+            '    <button class="btn btn-secondary btn-sm" @click="closeErrorModal">Закрыть</button>' +
             '  </template>' +
             '</modal-window>' +
             '</div>'
