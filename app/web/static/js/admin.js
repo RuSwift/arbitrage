@@ -379,6 +379,301 @@
             '</div>'
     });
 
+    // --- Tokens (admin) ---
+    Vue.component('Tokens', {
+        delimiters: ['[[', ']]'],
+        data: function () {
+            return {
+                tokens: [],
+                total: 0,
+                page: 1,
+                pageSize: 20,
+                loading: true,
+                error: null,
+                filterSymbol: '',
+                filterSource: '',
+                showFormModal: false,
+                formToken: null,
+                formSymbol: '',
+                saving: false,
+                confirmDuplicate: { show: false, message: '', existingToken: null },
+                pendingAction: null,
+                confirmDelete: { show: false, token: null },
+                togglingId: null,
+                deletingId: null
+            };
+        },
+        mounted: function () {
+            this.loadTokens();
+        },
+        methods: {
+            loadTokens: function () {
+                var self = this;
+                self.loading = true;
+                self.error = null;
+                var params = new URLSearchParams({
+                    page: self.page,
+                    page_size: self.pageSize
+                });
+                if (self.filterSymbol) params.set('symbol', self.filterSymbol);
+                if (self.filterSource) params.set('source', self.filterSource);
+                fetch('/api/admin/tokens?' + params, { credentials: 'include' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.tokens = data.tokens || [];
+                        self.total = data.total || 0;
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки токенов';
+                    })
+                    .finally(function () { self.loading = false; });
+            },
+            applyFilters: function () {
+                this.page = 1;
+                this.loadTokens();
+            },
+            openAdd: function () {
+                this.formToken = null;
+                this.formSymbol = '';
+                this.showFormModal = true;
+            },
+            openEdit: function (token) {
+                this.formToken = token;
+                this.formSymbol = token.symbol;
+                this.showFormModal = true;
+            },
+            closeForm: function () {
+                this.showFormModal = false;
+                this.formToken = null;
+                this.formSymbol = '';
+                this.confirmDuplicate = { show: false, message: '', existingToken: null };
+            },
+            saveToken: function () {
+                var self = this;
+                var symbol = (self.formSymbol || '').trim().toUpperCase();
+                if (!symbol) {
+                    self.error = 'Введите символ токена';
+                    return;
+                }
+
+                if (self.formToken) {
+                    self.doPut(symbol);
+                    return;
+                }
+
+                var existing = self.tokens.find(function (t) {
+                    return t.symbol.toUpperCase() === symbol && t.source === 'manual';
+                });
+                if (existing) {
+                    self.confirmDuplicate = {
+                        show: true,
+                        message: 'Токен с символом «' + symbol + '» (manual) уже существует. Открыть для редактирования?',
+                        existingToken: existing
+                    };
+                    self.pendingAction = 'edit_existing';
+                    return;
+                }
+                self.doPost(symbol);
+            },
+            onConfirmDuplicate: function () {
+                if (this.pendingAction === 'edit_existing' && this.confirmDuplicate.existingToken) {
+                    this.closeForm();
+                    this.openEdit(this.confirmDuplicate.existingToken);
+                }
+                this.confirmDuplicate = { show: false, message: '', existingToken: null };
+                this.pendingAction = null;
+            },
+            onCancelDuplicate: function () {
+                this.confirmDuplicate = { show: false, message: '', existingToken: null };
+                this.pendingAction = null;
+            },
+            doPost: function (symbol) {
+                var self = this;
+                self.saving = true;
+                self.error = null;
+                fetch('/api/admin/tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ symbol: symbol })
+                })
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Ошибка создания'); });
+                        return r.json();
+                    })
+                    .then(function () {
+                        self.closeForm();
+                        self.loadTokens();
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка создания токена';
+                    })
+                    .finally(function () { self.saving = false; });
+            },
+            doPut: function (symbol) {
+                var self = this;
+                if (!self.formToken || self.formToken.source !== 'manual') return;
+                self.saving = true;
+                self.error = null;
+                fetch('/api/admin/tokens/' + self.formToken.id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ symbol: symbol })
+                })
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Ошибка обновления'); });
+                        return r.json();
+                    })
+                    .then(function () {
+                        self.closeForm();
+                        self.loadTokens();
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка обновления токена';
+                    })
+                    .finally(function () { self.saving = false; });
+            },
+            formatDate: function (s) {
+                if (!s) return '';
+                var d = new Date(s);
+                return d.toLocaleString('ru-RU');
+            },
+            confirmDeleteToken: function (token) {
+                this.confirmDelete = { show: true, token: token };
+            },
+            cancelDelete: function () {
+                this.confirmDelete = { show: false, token: null };
+            },
+            doDelete: function () {
+                var self = this;
+                var token = self.confirmDelete.token;
+                if (!token) { self.cancelDelete(); return; }
+                self.deletingId = token.id;
+                fetch('/api/admin/tokens/' + token.id, { method: 'DELETE', credentials: 'include' })
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Ошибка удаления'); });
+                        return r.json();
+                    })
+                    .then(function () {
+                        self.cancelDelete();
+                        self.loadTokens();
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка удаления токена';
+                        self.cancelDelete();
+                    })
+                    .finally(function () { self.deletingId = null; });
+            },
+            toggleActive: function (token) {
+                var self = this;
+                if (token.source !== 'manual') return;
+                self.togglingId = token.id;
+                var next = !token.is_active;
+                fetch('/api/admin/tokens/' + token.id, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ is_active: next })
+                })
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Ошибка'); });
+                        return r.json();
+                    })
+                    .then(function (updated) {
+                        var i = self.tokens.findIndex(function (t) { return t.id === token.id; });
+                        if (i !== -1) self.tokens.splice(i, 1, updated);
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка изменения статуса';
+                    })
+                    .finally(function () { self.togglingId = null; });
+            }
+        },
+        template:
+            '<div class="container-fluid">' +
+            '  <div class="alert alert-info mb-4" role="alert">' +
+            '    <i class="bi bi-info-circle me-2"></i>' +
+            '    <strong>Токены в работе.</strong> Здесь перечислены токены, взятые в работу для расчёта спредов. Добавляйте символы вручную или используйте загрузку из CoinMarketCap.' +
+            '  </div>' +
+            '  <div class="card">' +
+            '    <div class="card-header d-flex justify-content-between align-items-center">' +
+            '      <span><i class="bi bi-currency-bitcoin me-1"></i>Токены</span>' +
+            '      <button class="btn btn-primary btn-sm" @click="openAdd"><i class="bi bi-plus me-1"></i>Добавить</button>' +
+            '    </div>' +
+            '    <div class="card-body">' +
+            '      <div v-if="error" class="alert alert-danger">[[ error ]]</div>' +
+            '      <div class="row g-2 mb-3">' +
+            '        <div class="col-md-4"><input type="text" class="form-control form-control-sm" v-model="filterSymbol" placeholder="Символ" @keyup.enter="applyFilters"/></div>' +
+            '        <div class="col-md-4">' +
+            '          <select class="form-select form-select-sm" v-model="filterSource">' +
+            '            <option value="">Все источники</option>' +
+            '            <option value="coinmarketcap">coinmarketcap</option>' +
+            '            <option value="manual">manual</option>' +
+            '          </select>' +
+            '        </div>' +
+            '        <div class="col-md-2"><button class="btn btn-secondary btn-sm w-100" @click="applyFilters">Фильтр</button></div>' +
+            '      </div>' +
+            '      <div v-if="loading" class="text-muted small">Загрузка...</div>' +
+            '      <div v-else class="table-responsive">' +
+            '        <table class="table table-sm table-hover">' +
+            '          <thead><tr><th>ID</th><th>Символ</th><th>Источник</th><th>IsActive</th><th>Создан</th><th>Обновлён</th><th></th></tr></thead>' +
+            '          <tbody>' +
+            '            <tr v-for="t in tokens" :key="t.id">' +
+            '              <td>[[ t.id ]]</td>' +
+            '              <td>[[ t.symbol ]]</td>' +
+            '              <td>[[ t.source ]]</td>' +
+            '              <td>' +
+            '                <span v-if="t.is_active" class="badge bg-success">Да</span>' +
+            '                <span v-else class="badge bg-secondary">Нет</span>' +
+            '              </td>' +
+            '              <td>[[ formatDate(t.created_at) ]]</td>' +
+            '              <td>[[ formatDate(t.updated_at) ]]</td>' +
+            '              <td>' +
+            '                <template v-if="t.source === \'manual\'">' +
+            '                  <button class="btn btn-outline-primary btn-sm me-1" @click="openEdit(t)" title="Редактировать"><i class="bi bi-pencil"></i></button>' +
+            '                  <button class="btn btn-outline-warning btn-sm me-1" :disabled="togglingId === t.id" @click="toggleActive(t)" :title="t.is_active ? \'Сделать неактивным\' : \'Сделать активным\'">' +
+            '                    <span v-if="togglingId === t.id" class="spinner-border spinner-border-sm"></span>' +
+            '                    <i v-else :class="t.is_active ? \'bi bi-pause-circle\' : \'bi bi-play-circle\'"></i>' +
+            '                  </button>' +
+            '                  <button class="btn btn-outline-danger btn-sm" :disabled="deletingId === t.id" @click="confirmDeleteToken(t)" title="Удалить">' +
+            '                    <span v-if="deletingId === t.id" class="spinner-border spinner-border-sm"></span>' +
+            '                    <i v-else class="bi bi-trash"></i>' +
+            '                  </button>' +
+            '                </template>' +
+            '                <span v-else class="text-muted small">—</span>' +
+            '              </td>' +
+            '            </tr>' +
+            '          </tbody>' +
+            '        </table>' +
+            '      </div>' +
+            '      <div v-if="total > pageSize" class="mt-2 small text-muted">Показано [[ tokens.length ]] из [[ total ]]</div>' +
+            '    </div>' +
+            '  </div>' +
+            '  <!-- Form modal -->' +
+            '  <div v-if="showFormModal" class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1">' +
+            '    <div class="modal-dialog modal-dialog-centered">' +
+            '      <div class="modal-content">' +
+            '        <div class="modal-header">' +
+            '          <h5 class="modal-title">[[ formToken ? "Редактировать токен" : "Добавить токен" ]]</h5>' +
+            '          <button type="button" class="btn-close" @click="closeForm" :disabled="saving"></button>' +
+            '        </div>' +
+            '        <div class="modal-body">' +
+            '          <label class="form-label">Символ</label>' +
+            '          <input type="text" class="form-control" v-model="formSymbol" placeholder="BTC" :disabled="saving"/>' +
+            '        </div>' +
+            '        <div class="modal-footer">' +
+            '          <button class="btn btn-secondary" @click="closeForm" :disabled="saving">Отмена</button>' +
+            '          <button class="btn btn-primary" @click="saveToken" :disabled="saving">[[ saving ? "Сохранение…" : "Сохранить" ]]</button>' +
+            '        </div>' +
+            '      </div>' +
+            '    </div>' +
+            '  </div>' +
+            '  <confirm-dialog :show="confirmDuplicate.show" title="Токен уже существует" :message="confirmDuplicate.message" confirmText="Открыть для редактирования" cancelText="Отмена" type="warning" @confirm="onConfirmDuplicate" @cancel="onCancelDuplicate"></confirm-dialog>' +
+            '  <confirm-dialog :show="confirmDelete.show" title="Удалить токен" :message="confirmDelete.token ? (\'Удалить токен \' + confirmDelete.token.symbol + \'?\') : \'\'" confirmText="Удалить" cancelText="Отмена" type="danger" :loading="deletingId !== null" @confirm="doDelete" @cancel="cancelDelete"></confirm-dialog>' +
+            '</div>'
+    });
+
     // Страница «Crawler» в панели: обёртка над crawler-admin
     Vue.component('Crawler', {
         delimiters: ['[[', ']]'],

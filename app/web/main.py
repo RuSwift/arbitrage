@@ -39,6 +39,14 @@ def create_app():
                     "page": "Crawler",
                 },
                 {
+                    "id": "tokens",
+                    "href": "/admin/tokens",
+                    "icon_class": "bi bi-currency-bitcoin",
+                    "label": "Токены",
+                    "sub": [],
+                    "page": "Tokens",
+                },
+                {
                     "id": "bookdepth",
                     "href": "/bookdepth",
                     "icon_class": "bi bi-graph-up",
@@ -67,6 +75,23 @@ def create_app():
                 "side_menu": _SIDE_MENU,
                 "selected_menu": "crawler",
                 "current_page": "Crawler",
+                "user_login": user.sub,
+            },
+        )
+
+    @app.get("/admin/tokens", response_class=HTMLResponse)
+    async def admin_tokens_page(request: Request):
+        user = await get_current_admin_from_request(request)
+        if not user:
+            return RedirectResponse(url="/login", status_code=302)
+        return templates.TemplateResponse(
+            "admin.html",
+            {
+                "request": request,
+                "app_name": "Arbitrage",
+                "side_menu": _SIDE_MENU,
+                "selected_menu": "tokens",
+                "current_page": "Tokens",
                 "user_login": user.sub,
             },
         )

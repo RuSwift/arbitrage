@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CrawlerIteration, CrawlerJob
+from app.db.models import CrawlerIteration, CrawlerJob, Token
 from app.web.dependencies import get_async_db, get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
@@ -197,3 +197,161 @@ async def crawler_stats(
         "by_status": [{"status": s, "count": n} for s, n in by_status],
         "last_job": _job_to_dict(last_job) if last_job else None,
     }
+
+
+# --- Tokens (admin CRUD) ---
+
+def _token_to_dict(t: Token) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "symbol": t.symbol,
+        "source": t.source,
+        "is_active": t.is_active,
+        "created_at": _serialize_dt(t.created_at),
+        "updated_at": _serialize_dt(t.updated_at),
+    }
+
+
+@router.get("/tokens")
+async def list_tokens(
+    db: AsyncSession = Depends(get_async_db),
+    symbol: str | None = Query(None),
+    source: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """List tokens with optional symbol and source filters."""
+    base = select(Token)
+    if symbol:
+        base = base.where(Token.symbol.ilike(f"%{symbol}%"))
+    if source:
+        base = base.where(Token.source == source)
+
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
+    total = total_result.scalar() or 0
+
+    stmt = (
+        base.order_by(Token.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(stmt)
+    tokens = result.scalars().all()
+
+    return {
+        "tokens": [_token_to_dict(t) for t in tokens],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.post("/tokens")
+async def create_token(
+    body: dict[str, str],
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Create a token with source='manual'. symbol required."""
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+
+    existing = await db.execute(
+        select(Token).where(Token.symbol == symbol, Token.source == "manual")
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token with symbol '{symbol}' and source 'manual' already exists",
+        )
+
+    token = Token(symbol=symbol, source="manual", is_active=True)
+    db.add(token)
+    await db.commit()
+    await db.refresh(token)
+    return _token_to_dict(token)
+
+
+@router.put("/tokens/{token_id}")
+async def update_token(
+    token_id: int,
+    body: dict[str, str],
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Update a token (only source='manual')."""
+    result = await db.execute(select(Token).where(Token.id == token_id))
+    token = result.scalar_one_or_none()
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.source != "manual":
+        raise HTTPException(
+            status_code=403,
+            detail="Only tokens with source 'manual' can be edited",
+        )
+
+    symbol = (body.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+
+    duplicate = await db.execute(
+        select(Token).where(
+            Token.symbol == symbol,
+            Token.source == "manual",
+            Token.id != token_id,
+        )
+    )
+    if duplicate.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Another token with symbol '{symbol}' and source 'manual' already exists",
+        )
+
+    token.symbol = symbol
+    token.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(token)
+    return _token_to_dict(token)
+
+
+@router.patch("/tokens/{token_id}")
+async def patch_token(
+    token_id: int,
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Toggle is_active (only source='manual')."""
+    result = await db.execute(select(Token).where(Token.id == token_id))
+    token = result.scalar_one_or_none()
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.source != "manual":
+        raise HTTPException(
+            status_code=403,
+            detail="Only tokens with source 'manual' can be modified",
+        )
+    if "is_active" in body:
+        token.is_active = bool(body["is_active"])
+    token.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(token)
+    return _token_to_dict(token)
+
+
+@router.delete("/tokens/{token_id}")
+async def delete_token(
+    token_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Delete token (only source='manual')."""
+    result = await db.execute(select(Token).where(Token.id == token_id))
+    token = result.scalar_one_or_none()
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.source != "manual":
+        raise HTTPException(
+            status_code=403,
+            detail="Only tokens with source 'manual' can be deleted",
+        )
+    await db.delete(token)
+    await db.commit()
+    return {"ok": True}
