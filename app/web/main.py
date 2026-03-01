@@ -47,6 +47,14 @@ def create_app():
                     "page": "Tokens",
                 },
                 {
+                    "id": "configs",
+                    "href": "/admin/configs",
+                    "icon_class": "bi bi-gear",
+                    "label": "Конфиги",
+                    "sub": [],
+                    "page": "Configs",
+                },
+                {
                     "id": "bookdepth",
                     "href": "/bookdepth",
                     "icon_class": "bi bi-graph-up",
@@ -78,6 +86,7 @@ def create_app():
                 "user_login": user.sub,
             },
         )
+
 
     return app
 

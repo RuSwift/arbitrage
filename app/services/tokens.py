@@ -23,7 +23,7 @@ class TokensService(BaseService):
     """Сервис обновления и чтения токенов (таблица token)."""
 
     class Config(BaseModel, extra='ignore'):
-        cmc_top: int = 500
+        cmc_top: int = 1000
         """Количество токенов для загрузки из CoinMarketCap."""
         cmc_cache_timeout: int = 60 * 60 * 24
         """Таймаут кэша для токенов из CoinMarketCap."""
@@ -75,7 +75,10 @@ class TokensService(BaseService):
         """
         config = await ServiceConfigRegistry.aget(
             self.db, "TokensService", self.__class__.Config
-        ) or self.__class__.Config()
+        )
+        if config is None:
+            config = self.__class__.Config()
+            await ServiceConfigRegistry.aset(self.db, "TokensService", config)
         raw = await self.redis.get(CMC_SETUP_CACHE_KEY)
         if raw:
             try:

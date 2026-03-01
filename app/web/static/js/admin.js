@@ -1051,6 +1051,144 @@
             '</div>'
     });
 
+    // --- Configs (admin): редактирование service_config ---
+    Vue.component('Configs', {
+        delimiters: ['[[', ']]'],
+        data: function () {
+            return {
+                configs: [],
+                loading: true,
+                error: null,
+                editModal: { show: false, serviceName: '', configJson: '', saving: false },
+                editError: null
+            };
+        },
+        mounted: function () {
+            this.loadConfigs();
+        },
+        methods: {
+            loadConfigs: function () {
+                var self = this;
+                self.loading = true;
+                self.error = null;
+                fetch('/api/admin/configs', { credentials: 'include' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        self.configs = data.configs || [];
+                    })
+                    .catch(function (e) {
+                        self.error = e.message || 'Ошибка загрузки конфигов';
+                    })
+                    .finally(function () { self.loading = false; });
+            },
+            formatDate: function (s) {
+                if (!s) return '—';
+                try {
+                    var d = new Date(s);
+                    return d.toLocaleString('ru-RU');
+                } catch (e) { return s; }
+            },
+            openEdit: function (c) {
+                var self = this;
+                self.editModal.serviceName = c.service_name;
+                self.editModal.configJson = typeof c.config === 'object' ? JSON.stringify(c.config, null, 2) : (c.config || '{}');
+                self.editModal.show = true;
+                self.editError = null;
+            },
+            closeEdit: function () {
+                this.editModal.show = false;
+                this.editModal.serviceName = '';
+                this.editModal.configJson = '';
+                this.editError = null;
+            },
+            saveConfig: function () {
+                var self = this;
+                var jsonStr = (self.editModal.configJson || '').trim();
+                if (!jsonStr) {
+                    self.editError = 'Введите JSON конфига';
+                    return;
+                }
+                var configObj;
+                try {
+                    configObj = JSON.parse(jsonStr);
+                } catch (e) {
+                    self.editError = 'Невалидный JSON: ' + e.message;
+                    return;
+                }
+                if (typeof configObj !== 'object' || configObj === null) {
+                    self.editError = 'Конфиг должен быть объектом (JSON object)';
+                    return;
+                }
+                self.editModal.saving = true;
+                self.editError = null;
+                var name = encodeURIComponent(self.editModal.serviceName);
+                fetch('/api/admin/configs/' + name, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(configObj)
+                })
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Ошибка сохранения'); });
+                        return r.json();
+                    })
+                    .then(function (updated) {
+                        var i = self.configs.findIndex(function (x) { return x.service_name === self.editModal.serviceName; });
+                        if (i !== -1) self.configs.splice(i, 1, updated);
+                        self.closeEdit();
+                        self.loadConfigs();
+                    })
+                    .catch(function (e) {
+                        self.editError = e.message || 'Ошибка сохранения';
+                    })
+                    .finally(function () { self.editModal.saving = false; });
+            }
+        },
+        template:
+            '<div class="container-fluid">' +
+            '  <div class="card">' +
+            '    <div class="card-header"><i class="bi bi-gear me-1"></i>Конфиги сервисов</div>' +
+            '    <div class="card-body">' +
+            '      <div v-if="error" class="alert alert-danger">[[ error ]]</div>' +
+            '      <p class="text-muted small">Конфигурации из таблицы <code>service_config</code>. Редактирование в JSON.</p>' +
+            '      <div v-if="loading" class="text-muted small">Загрузка...</div>' +
+            '      <div v-else class="table-responsive">' +
+            '        <table class="table table-sm table-hover">' +
+            '          <thead><tr><th>Сервис</th><th>Обновлён</th><th></th></tr></thead>' +
+            '          <tbody>' +
+            '            <tr v-for="c in configs" :key="c.id">' +
+            '              <td><code>[[ c.service_name ]]</code></td>' +
+            '              <td>[[ formatDate(c.updated_at) ]]</td>' +
+            '              <td><button class="btn btn-outline-primary btn-sm" @click="openEdit(c)"><i class="bi bi-pencil me-1"></i>Редактировать</button></td>' +
+            '            </tr>' +
+            '          </tbody>' +
+            '        </table>' +
+            '      </div>' +
+            '      <div v-if="!loading && configs.length === 0" class="text-muted small">Нет записей</div>' +
+            '    </div>' +
+            '  </div>' +
+            '  <div v-if="editModal.show" class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1">' +
+            '    <div class="modal-dialog modal-lg modal-dialog-centered">' +
+            '      <div class="modal-content">' +
+            '        <div class="modal-header">' +
+            '          <h5 class="modal-title">Конфиг: [[ editModal.serviceName ]]</h5>' +
+            '          <button type="button" class="btn-close" @click="closeEdit" :disabled="editModal.saving"></button>' +
+            '        </div>' +
+            '        <div class="modal-body">' +
+            '          <div v-if="editError" class="alert alert-danger small">[[ editError ]]</div>' +
+            '          <label class="form-label">JSON</label>' +
+            '          <textarea class="form-control font-monospace small" v-model="editModal.configJson" rows="14" :disabled="editModal.saving" style="font-size: 12px;"></textarea>' +
+            '        </div>' +
+            '        <div class="modal-footer">' +
+            '          <button class="btn btn-secondary" @click="closeEdit" :disabled="editModal.saving">Отмена</button>' +
+            '          <button class="btn btn-primary" @click="saveConfig" :disabled="editModal.saving">[[ editModal.saving ? "Сохранение…" : "Сохранить" ]]</button>' +
+            '        </div>' +
+            '      </div>' +
+            '    </div>' +
+            '  </div>' +
+            '</div>'
+    });
+
     // Страница «Crawler» в панели: обёртка над crawler-admin
     Vue.component('Crawler', {
         delimiters: ['[[', ']]'],

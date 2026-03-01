@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CrawlerIteration, CrawlerJob, Token
+from app.db.models import CrawlerIteration, CrawlerJob, ServiceConfig, Token
 from app.web.dependencies import get_async_db, get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
@@ -396,3 +396,74 @@ async def delete_token(
     await db.delete(token)
     await db.commit()
     return {"ok": True}
+
+
+# --- Service configs (admin) ---
+
+
+def _service_config_to_dict(row: ServiceConfig) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "service_name": row.service_name,
+        "config": row.config,
+        "created_at": _serialize_dt(row.created_at),
+        "updated_at": _serialize_dt(row.updated_at),
+    }
+
+
+@router.get("/configs")
+async def list_configs(db: AsyncSession = Depends(get_async_db)):
+    """List all service configs (service_name, id, updated_at; config optional for list)."""
+    result = await db.execute(select(ServiceConfig).order_by(ServiceConfig.service_name))
+    rows = result.scalars().all()
+    return {
+        "configs": [
+            {
+                "id": r.id,
+                "service_name": r.service_name,
+                "config": r.config,
+                "created_at": _serialize_dt(r.created_at),
+                "updated_at": _serialize_dt(r.updated_at),
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/configs/{service_name:path}")
+async def get_config(
+    service_name: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Get one service config by name."""
+    result = await db.execute(
+        select(ServiceConfig).where(ServiceConfig.service_name == service_name)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Config not found")
+    return _service_config_to_dict(row)
+
+
+@router.put("/configs/{service_name:path}")
+async def update_config(
+    service_name: str,
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Update service config (JSON body = config dict). Creates if not exists."""
+    result = await db.execute(
+        select(ServiceConfig).where(ServiceConfig.service_name == service_name)
+    )
+    row = result.scalar_one_or_none()
+    if row:
+        row.config = body
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(ServiceConfig(service_name=service_name, config=body))
+    await db.commit()
+    result = await db.execute(
+        select(ServiceConfig).where(ServiceConfig.service_name == service_name)
+    )
+    row = result.scalar_one()
+    return _service_config_to_dict(row)
