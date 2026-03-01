@@ -18,6 +18,16 @@
             "env": {},
             "jinja": true,
             "justMyCode": false
+        },
+        {
+            "name": "crawler2",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/crawler2.py",
+            "args": ["--exchange-id", "bybit", "--kind", "perpetual"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

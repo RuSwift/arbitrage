@@ -24,6 +24,17 @@ class CMCListing:
     slug: str
 
 
+def _get_cmc_error_message(data: dict | None) -> str | None:
+    """Извлекает текст ошибки из ответа API (status.error_message)."""
+    if not data or not isinstance(data, dict):
+        return None
+    status = data.get("status")
+    if not isinstance(status, dict):
+        return None
+    msg = status.get("error_message")
+    return str(msg) if msg is not None else None
+
+
 def _parse_listings_page(raw: list) -> list[CMCListing]:
     """Парсит массив элементов из ответа API (data) в list[CMCListing]."""
     result: list[CMCListing] = []
@@ -79,14 +90,26 @@ class CoinMarketCapConnector:
                     headers=headers,
                     timeout=REQUEST_TIMEOUT_SEC,
                 )
-                r.raise_for_status()
-                data = r.json()
-            except (requests.RequestException, ValueError) as _:
-                break
-
-            raw = data.get("data")
-            if not isinstance(raw, list) or not raw:
-                break
+                data = r.json() if r.content else {}
+                if not r.ok:
+                    msg = _get_cmc_error_message(data) or r.reason or f"HTTP {r.status_code}"
+                    raise ValueError(msg)
+                raw = data.get("data")
+                if not isinstance(raw, list) or not raw:
+                    msg = _get_cmc_error_message(data)
+                    if msg:
+                        raise ValueError(msg)
+                    break
+            except requests.RequestException as e:
+                if isinstance(e, requests.HTTPError) and e.response is not None:
+                    try:
+                        data = e.response.json()
+                    except Exception:
+                        data = {}
+                    msg = _get_cmc_error_message(data)
+                    if msg:
+                        raise ValueError(msg) from e
+                raise
 
             parsed = _parse_listings_page(raw)
             for p in parsed:
@@ -124,14 +147,32 @@ class CoinMarketCapConnector:
                         headers=headers,
                         timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SEC),
                     ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
-                except (aiohttp.ClientError, ValueError):
-                    break
-
-                raw = data.get("data")
-                if not isinstance(raw, list) or not raw:
-                    break
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            data = {}
+                        if not resp.ok:
+                            msg = _get_cmc_error_message(data) or resp.reason or f"HTTP {resp.status}"
+                            raise ValueError(msg)
+                        raw = data.get("data")
+                        if not isinstance(raw, list) or not raw:
+                            msg = _get_cmc_error_message(data)
+                            if msg:
+                                raise ValueError(msg)
+                            break
+                except ValueError:
+                    raise
+                except aiohttp.ClientResponseError as e:
+                    try:
+                        data = await e.response.json() if e.response.content else {}
+                    except Exception:
+                        data = {}
+                    msg = _get_cmc_error_message(data)
+                    if msg:
+                        raise ValueError(msg) from e
+                    raise
+                except aiohttp.ClientError:
+                    raise
 
                 parsed = _parse_listings_page(raw)
                 for p in parsed:
