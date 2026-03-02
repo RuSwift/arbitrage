@@ -46,11 +46,13 @@ class CEXPerpetualCrawler(BaseService):
         uow: UnitOfWork,
         exchange_id: str,
         config: Config | None = None,
+        redis_key_prefix: str = "",
     ) -> None:
         super().__init__(uow)
         self._exchange_id = exchange_id
         self._config = config
         self._connector: BaseCEXPerpetualConnector | None = None
+        self._redis_key_prefix = redis_key_prefix or ""
 
     async def _resolve_config(self) -> Config:
         """Конфиг: переданный в __init__, из БД (CEXPerpetualCrawler) или дефолтный."""
@@ -182,7 +184,7 @@ class CEXPerpetualCrawler(BaseService):
     def _redis_window_key(self, window_type: str, symbol: str) -> str:
         """Ключ Redis для окна (значение с TTL, по истечении — повторный запрос разрешён)."""
         safe_sym = (symbol or "").replace("/", "_")
-        return f"arbitrage:crawler:{self.kind}:window:{window_type}:{self._exchange_id}:{safe_sym}"
+        return f"{self._redis_key_prefix}arbitrage:crawler:{self.kind}:window:{window_type}:{self._exchange_id}:{safe_sym}"
 
     _WINDOW_KEY_MAGIC = "1"  # значение ключа новой схемы (с TTL); иное — старая схема (timestamp)
 
