@@ -249,6 +249,7 @@ class CEXPerpetualCrawler(BaseService):
             self._run_once_impl(it, now_utc, db, redis, config)
             if it.status == "pending":
                 it.status = "success"
+                it.inactive_till_timestamp = None
             it.stop = now_utc
             db.flush()
         except Exception as e:
@@ -286,8 +287,12 @@ class CEXPerpetualCrawler(BaseService):
             if fr is not None:
                 self._set_window(redis, key_fr, config.funding_rate_window_min)
                 it.funding_rate = fr.as_dict()
-                if getattr(fr, "next_rate", None) is not None:
-                    it.next_funding_rate = {"next_funding_utc": fr.next_funding_utc, "next_rate": fr.next_rate}
+                next_utc = getattr(fr, "next_funding_utc", None)
+                if next_utc is not None and float(next_utc) > 0:
+                    it.next_funding_rate = {
+                        "next_funding_utc": fr.next_funding_utc,
+                        "next_rate": getattr(fr, "next_rate", None),
+                    }
         # История фандинга — не чаще funding_history_window_min; ключ окна только после успешного ответа
         key_hist = self._redis_window_key("funding_history", symbol)
         if self._window_fetch_allowed(redis, key_hist):
