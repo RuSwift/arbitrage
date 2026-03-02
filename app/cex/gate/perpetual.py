@@ -377,7 +377,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
                 utc=_utc_now_float(),
             )
         if funding_time is not None and isinstance(funding_time, (int, float)):
-            next_utc = float(funding_time) + 8 * 3600
+            next_utc = float(funding_time)
         else:
             next_utc = 0.0
         return FundingRate(

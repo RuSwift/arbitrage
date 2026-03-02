@@ -245,7 +245,7 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         data = self._get(
             "/linear-swap-ex/market/depth",
-            {"contract_code": contract, "type": "step5"},
+            {"contract_code": contract, "type": "step1"},
         )
         if data.get("status") != "ok" or "tick" not in data:
             raise RuntimeError(data.get("err_msg", "Failed to get depth"))

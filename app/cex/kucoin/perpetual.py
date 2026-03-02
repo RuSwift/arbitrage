@@ -465,7 +465,7 @@ class KucoinPerpetualConnector(BaseCEXPerpetualConnector):
             return None
         n = limit if limit is not None else DEFAULT_FUNDING_HISTORY_LIMIT
         now_ms = int(_utc_now_float() * 1000)
-        start_ms = now_ms - n * 8 * 3600 * 1000  # 8h funding interval
+        start_ms = now_ms - 31 * 24 * 3600 * 1000  # 31 days back (works for 1h and 8h intervals)
         try:
             data = self._get(
                 "/api/v1/contract/funding-rates",
