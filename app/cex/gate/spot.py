@@ -14,6 +14,7 @@ from app.cex.base import BaseCEXSpotConnector, Callback
 from app.cex.dto import (
     BidAsk,
     BookDepth,
+    BorrowableAsset,
     BookTicker,
     CandleStick,
     CurrencyPair,
@@ -21,9 +22,11 @@ from app.cex.dto import (
 )
 
 GATE_SPOT_API = "https://api.gateio.ws/api/v4"
+GATE_UNILOAN_API = "https://www.gate.com/api/web/v1/uniloan/uni-loan-loan-info"
 GATE_SPOT_WS = "wss://api.gateio.ws/ws/v4/"
 GATE_SPOT_WS_TESTNET = "wss://ws-testnet.gate.io/v4/ws/spot"
 QUOTES = ("USDT", "BTC", "ETH", "USDC")
+UNILOAN_PAGE_LIMIT = 700
 
 
 def _utc_now_float() -> float:
@@ -256,6 +259,55 @@ class GateSpotConnector(BaseCEXSpotConnector):
                 )
             )
         return result
+
+    def get_borrowable_assets(self) -> list[BorrowableAsset] | None:
+        """UniLoan loan info (public). Returns list + pool size and hourly rate."""
+        try:
+            url = f"{GATE_UNILOAN_API}?page=1&limit={UNILOAN_PAGE_LIMIT}&loanType=1"
+            r = self._request_limited(url, {}, self.REQUEST_TIMEOUT_SEC)
+            r.raise_for_status()
+            body = r.json()
+        except Exception as e:
+            self.log.exception("get_borrowable_assets failed: %s", e)
+            return None
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
+            return None
+        rows = data.get("list")
+        if not isinstance(rows, list):
+            return None
+        out: list[BorrowableAsset] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            asset_name = item.get("asset")
+            if not asset_name:
+                continue
+            try:
+                total_available = float(item.get("total_lend_available", 0) or 0)
+            except (TypeError, ValueError):
+                total_available = 0.0
+            try:
+                max_borrow = float(item.get("user_max_borrow_amount", 0) or 0)
+            except (TypeError, ValueError):
+                max_borrow = None
+            try:
+                rate_hour = float(item.get("last_time_loan_rate_hour", 0) or 0)
+            except (TypeError, ValueError):
+                rate_hour = None
+            is_borrowable = total_available > 0 or (max_borrow is not None and max_borrow > 0)
+            out.append(
+                BorrowableAsset(
+                    asset=str(asset_name),
+                    is_borrowable=is_borrowable,
+                    available_to_borrow=total_available if total_available > 0 else None,
+                    max_borrow=max_borrow if (max_borrow is not None and max_borrow > 0) else None,
+                    hourly_borrow_rate=rate_hour if rate_hour is not None else None,
+                    min_borrow=None,
+                    min_repay=None,
+                )
+            )
+        return out
 
     def get_depth(self, symbol: str, limit: int = 100) -> BookDepth | None:
         cp = self._exchange_symbol(symbol)

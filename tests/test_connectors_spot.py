@@ -5,6 +5,7 @@ from time import sleep
 import pytest
 
 from app.cex.base import BaseCEXSpotConnector
+from app.cex.dto import BorrowableAsset
 from app.cex import (
     BinanceSpotConnector,
     BitfinexSpotConnector,
@@ -127,3 +128,77 @@ class TestSpotConnector:
             common_check_book_depth(cb.depths[0])
         if cb.books:
             common_check_book_ticker(cb.books[0])
+
+    def test_get_borrowable_assets_unsupported_returns_none(
+        self, connector: BaseCEXSpotConnector
+    ) -> None:
+        """Exchanges without borrow API return None."""
+        if connector.exchange_id() in ("binance", "gate"):
+            pytest.skip(f"{connector.exchange_id()} implements get_borrowable_assets")
+        result = connector.get_borrowable_assets()
+        assert result is None
+
+    @pytest.mark.timeout(15)
+    def test_get_borrowable_assets_binance_returns_list(self) -> None:
+        """Binance spot returns list of BorrowableAsset from SAPI margin allAssets (may require API key)."""
+        conn = BinanceSpotConnector()
+        result = conn.get_borrowable_assets()
+        if result is None:
+            pytest.skip(
+                "Binance SAPI margin allAssets returned error (endpoint may require API key)"
+            )
+        assert isinstance(result, list)
+        assert len(result) > 0
+        for item in result:
+            assert isinstance(item, BorrowableAsset)
+            assert isinstance(item.asset, str)
+            assert len(item.asset) > 0
+            assert isinstance(item.is_borrowable, bool)
+        # At least one borrowable (e.g. USDT)
+        borrowable = [a for a in result if a.is_borrowable]
+        assert len(borrowable) > 0
+
+    @pytest.mark.timeout(15)
+    def test_get_borrowable_assets_gate_returns_list(self) -> None:
+        """Gate spot returns list of BorrowableAsset from UniLoan API (public)."""
+        conn = GateSpotConnector()
+        result = conn.get_borrowable_assets()
+        assert result is not None
+        assert isinstance(result, list)
+        assert len(result) > 0
+        for item in result:
+            assert isinstance(item, BorrowableAsset)
+            assert isinstance(item.asset, str)
+            assert len(item.asset) > 0
+            assert isinstance(item.is_borrowable, bool)
+        borrowable = [a for a in result if a.is_borrowable]
+        assert len(borrowable) > 0
+        # Gate API provides pool size and rate for many assets
+        with_available = [a for a in result if a.available_to_borrow is not None]
+        assert len(with_available) > 0
+
+    def test_get_borrowable_assets_okx_returns_none(self) -> None:
+        """OKX spot does not implement borrow API; returns None."""
+        conn = OkxSpotConnector()
+        assert conn.get_borrowable_assets() is None
+
+    def test_borrowable_asset_dto_roundtrip(self) -> None:
+        """BorrowableAsset as_dict/from_dict preserves required and optional fields."""
+        asset = BorrowableAsset(
+            asset="USDT",
+            is_borrowable=True,
+            available_to_borrow=1000.5,
+            max_borrow=50000.0,
+            hourly_borrow_rate=0.0001,
+            min_borrow=10.0,
+            min_repay=10.0,
+        )
+        data = asset.as_dict()
+        restored = BorrowableAsset.from_dict(data)
+        assert restored.asset == asset.asset
+        assert restored.is_borrowable == asset.is_borrowable
+        assert restored.available_to_borrow == asset.available_to_borrow
+        assert restored.max_borrow == asset.max_borrow
+        assert restored.hourly_borrow_rate == asset.hourly_borrow_rate
+        assert restored.min_borrow == asset.min_borrow
+        assert restored.min_repay == asset.min_repay

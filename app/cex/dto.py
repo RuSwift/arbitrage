@@ -239,3 +239,23 @@ class FundingRatePoint:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FundingRatePoint:
         return _from_dict(cls, data)
+
+
+@dataclass
+class BorrowableAsset:
+    """Unified DTO for a token available for margin borrow (list + optional reserves/rates)."""
+
+    asset: str
+    is_borrowable: bool
+    available_to_borrow: float | None = None
+    max_borrow: float | None = None
+    hourly_borrow_rate: float | None = None
+    min_borrow: float | None = None
+    min_repay: float | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return _as_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BorrowableAsset:
+        return _from_dict(cls, data)

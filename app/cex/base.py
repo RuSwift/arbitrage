@@ -10,6 +10,7 @@ import requests
 
 from app.cex.dto import (
     BookDepth,
+    BorrowableAsset,
     BookTicker,
     CandleStick,
     CurrencyPair,
@@ -208,6 +209,10 @@ class BaseCEXSpotConnector(_BaseCEXConnectorMixin, ABC):
         ...
 
     def get_withdraw_info(self) -> dict[str, list[WithdrawInfo]] | None:
+        return None
+
+    def get_borrowable_assets(self) -> list[BorrowableAsset] | None:
+        """Список токенов, доступных для margin-займа. None — биржа не поддерживает или данные недоступны."""
         return None
 
 

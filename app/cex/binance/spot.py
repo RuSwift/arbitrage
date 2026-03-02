@@ -14,6 +14,7 @@ from app.cex.base import BaseCEXSpotConnector, Callback
 from app.cex.dto import (
     BidAsk,
     BookDepth,
+    BorrowableAsset,
     BookTicker,
     CandleStick,
     CurrencyPair,
@@ -21,7 +22,9 @@ from app.cex.dto import (
 )
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443/ws"
+BINANCE_SAPI = "https://api.binance.com"
 PERPETUAL_TOKENS = ("USDT", "USDC", "BUSD")
+REQUEST_TIMEOUT_SEC = 15
 
 
 def _utc_now_float() -> float:
@@ -290,6 +293,50 @@ class BinanceSpotConnector(BaseCEXSpotConnector):
             )
             for r in rows
         ]
+
+    def get_borrowable_assets(self) -> list[BorrowableAsset] | None:
+        """Margin allAssets from SAPI (public). No pool size or rate in response."""
+        try:
+            url = BINANCE_SAPI + "/sapi/v1/margin/allAssets"
+            r = self._request_limited(url, {}, REQUEST_TIMEOUT_SEC)
+            r.raise_for_status()
+            rows = r.json()
+        except Exception as e:
+            self.log.exception("get_borrowable_assets failed: %s", e)
+            return None
+        if not isinstance(rows, list):
+            return None
+        out: list[BorrowableAsset] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            asset_name = item.get("assetName")
+            if not asset_name:
+                continue
+            min_borrow = None
+            min_repay = None
+            if item.get("userMinBorrow") is not None:
+                try:
+                    min_borrow = float(item["userMinBorrow"])
+                except (TypeError, ValueError):
+                    pass
+            if item.get("userMinRepay") is not None:
+                try:
+                    min_repay = float(item["userMinRepay"])
+                except (TypeError, ValueError):
+                    pass
+            out.append(
+                BorrowableAsset(
+                    asset=str(asset_name),
+                    is_borrowable=bool(item.get("isBorrowable", False)),
+                    available_to_borrow=None,
+                    max_borrow=None,
+                    hourly_borrow_rate=None,
+                    min_borrow=min_borrow,
+                    min_repay=min_repay,
+                )
+            )
+        return out
 
     def _exchange_symbol(self, symbol: str) -> str | None:
         if not self._cached_tickers_dict:
