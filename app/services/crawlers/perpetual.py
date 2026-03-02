@@ -186,14 +186,25 @@ class CEXPerpetualCrawler(BaseService):
 
     _WINDOW_KEY_MAGIC = "1"  # значение ключа новой схемы (с TTL); иное — старая схема (timestamp)
 
+    def _window_fetch_allowed(self, redis: "Redis", key: str) -> bool:
+        """True если ключ отсутствует или устарел (другое значение / нет TTL). Устаревшие ключи удаляются. Ключ не выставляется."""
+        raw = redis.get(key)
+        if raw is None:
+            return True
+        if raw == self._WINDOW_KEY_MAGIC and redis.ttl(key) != -1:
+            return False
+        redis.delete(key)
+        return True
+
+    def _set_window(self, redis: "Redis", key: str, window_min: int) -> None:
+        """Выставить ключ окна с TTL = window_min минут (после успешного запроса)."""
+        redis.setex(key, window_min * 60, self._WINDOW_KEY_MAGIC)
+
     def _may_fetch_by_window(self, redis: "Redis", key: str, window_min: int) -> bool:
         """True если ключ отсутствует (или истёк по TTL); при True выставляет ключ с TTL = window_min минут.
         Ключи с другим значением (старая схема с timestamp) или без TTL считаются устаревшими — удаляются и запрос разрешается."""
-        raw = redis.get(key)
-        if raw is not None:
-            if raw == self._WINDOW_KEY_MAGIC and redis.ttl(key) != -1:
-                return False
-            redis.delete(key)
+        if not self._window_fetch_allowed(redis, key):
+            return False
         redis.setex(key, window_min * 60, self._WINDOW_KEY_MAGIC)
         return True
 
@@ -281,12 +292,14 @@ class CEXPerpetualCrawler(BaseService):
             if hist is not None:
                 it.funding_rate_history = [p.as_dict() for p in hist]
 
-        # BookDepth — не чаще liquidity_book_window_min
+        # BookDepth — не чаще liquidity_book_window_min; ключ окна выставляем только после успешного ответа
         key_book = self._redis_window_key("book_depth", symbol)
-        book_fetched = self._may_fetch_by_window(redis, key_book, config.liquidity_book_window_min)
+        book_fetched = self._window_fetch_allowed(redis, key_book)
+        depth = None
         if book_fetched:
             depth = connector.get_depth(symbol, limit=max(config.liquidity_book_depth_factor * 2, 20))
             if depth is not None:
+                self._set_window(redis, key_book, config.liquidity_book_window_min)
                 it.book_depth = depth.as_dict()
                 bids = getattr(depth, "bids", []) or []
                 asks = getattr(depth, "asks", []) or []

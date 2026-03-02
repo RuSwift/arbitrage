@@ -290,12 +290,14 @@ class BitfinexPerpetualConnector(BaseCEXPerpetualConnector):
             )
         return result
 
+    # Bitfinex book API accepts len only "1", "25", or "100"
     def get_depth(self, symbol: str, limit: int = 100) -> BookDepth | None:
         ex_sym = self._exchange_symbol(symbol) or _symbol_to_bfx_deriv(symbol)
         if not ex_sym:
             return None
+        book_len = 1 if limit <= 1 else (25 if limit <= 25 else 100)
         try:
-            data = self._get(f"/book/{ex_sym}/P0", {"len": str(min(limit, self.DEPTH_API_MAX))})
+            data = self._get(f"/book/{ex_sym}/P0", {"len": str(book_len)})
         except Exception:
             return None
         if not isinstance(data, list):

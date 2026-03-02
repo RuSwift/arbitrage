@@ -238,7 +238,7 @@ class GatePerpetualConnector(BaseCEXPerpetualConnector):
         if symbols is not None:
             want = {s.upper() for s in symbols}
             raw = data if isinstance(data, list) else [data]
-            data = [row for row in raw if _gate_to_symbol(row.get("contract", "")) in want]
+            data = [row for row in raw if (row.get("contract") or "").upper() in want]
         if not isinstance(data, list):
             data = [data] if isinstance(data, dict) else []
         result: list[CurrencyPair] = []

@@ -308,11 +308,9 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
         if rate_val is None:
             return None
         next_ts = row.get("next_funding_time")
-        ticker = self._cached_perps_dict.get(contract) or self._cached_perps_dict.get(symbol)
-        sym = ticker.symbol if ticker else symbol
         next_utc = float(next_ts) / 1000 if next_ts is not None else 0.0
         return FundingRate(
-            symbol=sym,
+            symbol=symbol,
             rate=float(rate_val),
             next_funding_utc=next_utc,
             utc=_utc_now_float(),
@@ -358,6 +356,11 @@ class HtxPerpetualConnector(BaseCEXPerpetualConnector):
             self._cached_perps_dict.get(symbol)
             or self._cached_perps_dict.get(symbol.replace("/", "-"))
         )
+        if t is None and symbol.endswith("/USD") and "/" in symbol:
+            base = symbol.split("/", 1)[0]
+            t = self._cached_perps_dict.get(f"{base}/USDT") or self._cached_perps_dict.get(
+                f"{base}-USDT"
+            )
         return t.exchange_symbol if t else None
 
     def _on_ws_message(self, _: Any, raw: bytes | str) -> None:
