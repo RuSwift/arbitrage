@@ -241,3 +241,58 @@ def test_window_fetch_allowed_blocks_after_success(
     crawler._run_once_impl(mock_iteration, now_utc, mock_db, redis_client, config)
     # Итерация не получила данные (коннектор не вызывался для fr, т.к. окно занято)
     assert mock_iteration.funding_rate is None
+
+
+def test_pair_by_base_prefers_usdt_when_multiple_quotes():
+    """При нескольких парах на один base (BTC/USDC и BTC/USDT) в pair_by_base остаётся USDT."""
+    pairs = [
+        CurrencyPair(base="BTC", quote="USDC", ratio=66000.0, utc=1000.0),
+        CurrencyPair(base="BTC", quote="USDT", ratio=66100.0, utc=1000.0),
+    ]
+    pair_by_base = {}
+    for p in pairs:
+        if p.base not in pair_by_base:
+            pair_by_base[p.base] = p
+        elif p.quote == "USDT":
+            pair_by_base[p.base] = p
+    assert pair_by_base["BTC"].quote == "USDT"
+    assert pair_by_base["BTC"].ratio == 66100.0
+
+
+def test_pair_by_base_prefers_usdt_when_usdc_first():
+    """USDT выигрывает даже если пришёл первым в списке (перезапись при следующем base)."""
+    pairs = [
+        CurrencyPair(base="BTC", quote="USDT", ratio=66100.0, utc=1000.0),
+        CurrencyPair(base="BTC", quote="USDC", ratio=66000.0, utc=1000.0),
+    ]
+    pair_by_base = {}
+    for p in pairs:
+        if p.base not in pair_by_base:
+            pair_by_base[p.base] = p
+        elif p.quote == "USDT":
+            pair_by_base[p.base] = p
+    assert pair_by_base["BTC"].quote == "USDT"
+
+
+def test_liquidity_check_runs_when_depth_fetch_returns_none(
+    crawler, redis_client, mock_iteration, mock_db, config
+):
+    """При разрешённом окне и get_depth=None ликвидность проверяется по кешу (it.book_depth) — нивелирует ложный success для HTX."""
+    now_utc = datetime.now(timezone.utc)
+    # Окно book_depth не занято — запрос разрешён
+    key_book = crawler._redis_window_key("book_depth", "BTC/USDT")
+    assert redis_client.get(key_book) is None
+    # Коннектор возвращает None (ошибка/таймаут)
+    crawler._connector._depth_return = None
+    # Фандинг есть, чтобы не вылететь раньше на «no funding»
+    crawler._connector._fr_return = _sample_funding_rate()
+    mock_iteration.funding_rate = {"rate": 0.0005, "next_funding_utc": 1000.0, "utc": 500.0}
+    # В кеше стакан с малой ликвидностью (< 1000 USD по топ-5)
+    mock_iteration.book_depth = {
+        "bids": [{"price": 50000.0, "quantity": 0.001}],
+        "asks": [{"price": 50100.0, "quantity": 0.001}],
+    }
+    # ratio 50000 -> bid_usd = ask_usd = 50, min = 50 < 1000
+    crawler._run_once_impl(mock_iteration, now_utc, mock_db, redis_client, config)
+    assert mock_iteration.status == "inactive"
+    assert "insufficient liquidity" in (mock_iteration.comment or "")

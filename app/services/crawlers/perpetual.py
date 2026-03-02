@@ -123,7 +123,13 @@ class CEXPerpetualCrawler(BaseService):
         tickers_in_scope = [t for t in all_perpetuals if t.base in tokens_set]
         symbols_for_get_pairs = [t.exchange_symbol for t in tickers_in_scope]
         pairs = connector.get_pairs(symbols=symbols_for_get_pairs)
-        pair_by_base: dict[str, CurrencyPair] = {p.base: p for p in (pairs or [])}
+        # При нескольких парах на один base (напр. BTC/USDT и BTC/USDC) приоритет у USDT
+        pair_by_base: dict[str, CurrencyPair] = {}
+        for p in pairs or []:
+            if p.base not in pair_by_base:
+                pair_by_base[p.base] = p
+            elif p.quote == "USDT":
+                pair_by_base[p.base] = p
         bases_on_exchange = {t.base for t in all_perpetuals}
 
         now = datetime.now(timezone.utc)
@@ -326,8 +332,8 @@ class CEXPerpetualCrawler(BaseService):
                     db.flush()
                     return
 
-        # Проверка ликвидности по уже сохранённому стакану (если не запрашивали только что)
-        if not book_fetched and it.book_depth and isinstance(it.book_depth, dict):
+        # Проверка ликвидности по сохранённому стакану: когда не запрашивали ИЛИ запрос вернул None (ошибка/таймаут, напр. HTX)
+        if (not book_fetched or depth is None) and it.book_depth and isinstance(it.book_depth, dict):
             raw_bids = (it.book_depth.get("bids") or [])
             raw_asks = (it.book_depth.get("asks") or [])
             bid_usd, ask_usd = self._liquidity_usd_top_n(
