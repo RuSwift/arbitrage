@@ -277,19 +277,21 @@ class CEXPerpetualCrawler(BaseService):
                 f"CrawlerIteration id={it.id} symbol={symbol}: currency_pair.ratio missing or zero, cannot compute liquidity in USD"
             )
 
-        # Funding rate — не чаще funding_rate_window_min
+        # Funding rate — не чаще funding_rate_window_min; ключ окна только после успешного ответа
         key_fr = self._redis_window_key("funding_rate", symbol)
-        if self._may_fetch_by_window(redis, key_fr, config.funding_rate_window_min):
+        if self._window_fetch_allowed(redis, key_fr):
             fr = connector.get_funding_rate(symbol)
             if fr is not None:
+                self._set_window(redis, key_fr, config.funding_rate_window_min)
                 it.funding_rate = fr.as_dict()
                 if getattr(fr, "next_rate", None) is not None:
                     it.next_funding_rate = {"next_funding_utc": fr.next_funding_utc, "next_rate": fr.next_rate}
-        # История фандинга — не чаще funding_history_window_min
+        # История фандинга — не чаще funding_history_window_min; ключ окна только после успешного ответа
         key_hist = self._redis_window_key("funding_history", symbol)
-        if self._may_fetch_by_window(redis, key_hist, config.funding_history_window_min):
+        if self._window_fetch_allowed(redis, key_hist):
             hist = connector.get_funding_rate_history(symbol, limit=50)
             if hist is not None:
+                self._set_window(redis, key_hist, config.funding_history_window_min)
                 it.funding_rate_history = [p.as_dict() for p in hist]
 
         # BookDepth — не чаще liquidity_book_window_min; ключ окна выставляем только после успешного ответа
