@@ -167,6 +167,7 @@ class CEXPerpetualCrawler(BaseService):
                     it.start = now
                     it.stop = None
                     it.comment = None
+                    it.inactive_till_timestamp = None
                 publisher = PerpetualOrchestratorImpl(
                     db_session=db,
                     redis=redis,
@@ -185,7 +186,7 @@ class CEXPerpetualCrawler(BaseService):
         db.flush()
         for it in iterations:
             db.refresh(it)
-        return [it for it in iterations if it.status == "pending"]
+        return [it for it in iterations if it.status in ("pending", "success")]
 
     def _redis_window_key(self, window_type: str, symbol: str) -> str:
         """Ключ Redis для окна (значение с TTL, по истечении — повторный запрос разрешён)."""
